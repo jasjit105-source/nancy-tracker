@@ -14,7 +14,7 @@ async function initDB() {
       phone VARCHAR(20) UNIQUE NOT NULL,
       name VARCHAR(200),
       buy_score INTEGER,
-      window VARCHAR(50),
+      win_status VARCHAR(50),
       agent VARCHAR(100),
       city VARCHAR(200),
       lifecycle VARCHAR(100),
@@ -82,7 +82,7 @@ async function uploadContacts(contacts) {
         UPDATE nancy_contacts SET
           name = ${c.name || null},
           buy_score = ${c.buy_score || null},
-          window = ${c.window || null},
+          win_status = ${c.window || null},
           agent = ${c.agent || null},
           city = ${c.city || null},
           lifecycle = ${c.lifecycle || null},
@@ -97,7 +97,7 @@ async function uploadContacts(contacts) {
       updatedCount++;
     } else {
       await db`
-        INSERT INTO nancy_contacts (phone, name, buy_score, window, agent, city, lifecycle, reasons, hours_since, crm_score, priority, status, is_new, batch_date)
+        INSERT INTO nancy_contacts (phone, name, buy_score, win_status, agent, city, lifecycle, reasons, hours_since, crm_score, priority, status, is_new, batch_date)
         VALUES (${phone}, ${c.name || null}, ${c.buy_score || null}, ${c.window || null}, ${c.agent || null}, ${c.city || null}, ${c.lifecycle || null}, ${c.reasons || null}, ${c.hours_since || null}, ${c.crm_score || null}, ${c.priority || null}, 'Pendiente', TRUE, CURRENT_DATE)
       `;
       newCount++;
@@ -149,7 +149,6 @@ exports.handler = async (event) => {
     return { statusCode: 200, headers, body: "" };
   }
 
-  // Simple auth check
   const authHeader = event.headers.authorization || event.headers.Authorization || "";
   const token = authHeader.replace("Bearer ", "");
   const validToken = process.env.APP_TOKEN || "sahiba2026";
@@ -201,12 +200,7 @@ exports.handler = async (event) => {
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ 
-        error: err.message, 
-        type: err.constructor.name,
-        dbUrlSet: !!process.env.DATABASE_URL,
-        dbUrlPrefix: process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 30) + "..." : "NOT SET"
-      })
+      body: JSON.stringify({ error: err.message, type: err.constructor.name })
     };
   }
 };
