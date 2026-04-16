@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sahiba — Nancy Call Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f5f3f0;
+  --surface: #ffffff;
+  --border: #e4ded6;
+  --accent: #c9a96e;
+  --accent-dark: #b08d4f;
+  --green: #25D366;
+  --green-light: #e8f9ee;
+  --orange: #e67e22;
+  --orange-light: #fef0e8;
+  --red: #d94f4f;
+  --blue: #3b82f6;
+  --text: #1a1a1a;
+  --text-muted: #7a7268;
+  --radius: 12px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+/* ─── NAV ─── */
+.nav {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  height: 56px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.nav-brand {
+  font-family: 'Playfair Display', serif;
+  font-size: 20px;
+  font-weight: 700;
+  margin-right: 32px;
+}
+.nav-brand span { color: var(--accent); }
+.nav-tabs { display: flex; gap: 4px; }
+.nav-tab {
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+.nav-tab:hover { background: var(--bg); color: var(--text); }
+.nav-tab.active { background: var(--accent); color: #fff; }
+.nav-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.refresh-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.2s;
+}
+.refresh-btn:hover { border-color: var(--accent); color: var(--text); }
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ccc;
+}
+.connection-dot.connected { background: var(--green); }
+
+/* ─── VIEWS ─── */
+.view { display: none; padding: 24px; max-width: 1200px; margin: 0 auto; }
+.view.active { display: block; }
+
+/* ─── STATS CARDS ─── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+.stat-card .number {
+  font-family: 'Playfair Display', serif;
+  font-size: 28px;
+  font-weight: 700;
+}
+.stat-card .label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.stat-card.new-card .number { color: var(--green); }
+.stat-card.new-card { border-color: #c6efce; }
+
+/* ─── UPLOAD SECTION ─── */
+.upload-area {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow);
+}
+.upload-area h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.25s;
+}
+.dropzone:hover, .dropzone.dragover { border-color: var(--accent); background: #fdf8ef; }
+.dropzone h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.dropzone p { font-size: 13px; color: var(--text-muted); }
+.dropzone input { display: none; }
+.upload-result {
+  display: none;
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.upload-result.success { display: block; background: var(--green-light); color: #1a7a3a; }
+.upload-result.error { display: block; background: #fef5f5; color: var(--red); }
+
+/* ─── FILTERS ─── */
+.filters-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.filter-search {
+  flex: 1;
+  min-width: 200px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--surface);
+}
+.filter-search:focus { outline: none; border-color: var(--accent); }
+.filter-select {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.filter-select:focus { outline: none; border-color: var(--accent); }
+.count-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* ─── CONTACTS TABLE ─── */
+.table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.table-scroll {
+  overflow-x: auto;
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+thead { position: sticky; top: 0; z-index: 10; }
+th {
+  background: #4a4a4a;
+  color: #fff;
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f0ece6;
+  vertical-align: middle;
+}
+tr:hover { background: #faf8f5; }
+tr.row-new { background: var(--green-light); }
+tr.row-new:hover { background: #d4f0db; }
+
+/* Status badge */
+.status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.status-Pendiente { background: #fef3cd; color: #856404; }
+.status-Contactada { background: #d1ecf1; color: #0c5460; }
+.status-Respondió { background: #d4edda; color: #155724; }
+.status-Sin\ Respuesta { background: #f8d7da; color: #721c24; }
+.status-Venta { background: #c6efce; color: #006100; }
+.status-No\ Interesada { background: #e2e3e5; color: #383d41; }
+
+/* New badge */
+.new-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--green);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+/* Inline controls */
+.inline-select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  background: #fff;
+  cursor: pointer;
+  min-width: 120px;
+}
+.inline-select:focus { outline: none; border-color: var(--accent); }
+
+.notes-input {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  width: 160px;
+  background: #fff;
+}
+.notes-input:focus { outline: none; border-color: var(--accent); }
+
+.wa-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  background: var(--green);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wa-btn:hover { background: #1da851; }
+.wa-btn.sent { background: #ccc; color: #666; pointer-events: none; }
+
+/* ─── LOADING ─── */
+.loading {
+  text-align: center;
+  padding: 60px;
+  color: var(--text-muted);
+}
+.loading .spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  margin: 0 auto 12px;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── SETUP VIEW ─── */
+.setup-card {
+  max-width: 480px;
+  margin: 60px auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+.setup-card h2 {
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  margin-bottom: 8px;
+}
+.setup-card p { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
+.setup-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+.setup-input:focus { outline: none; border-color: var(--accent); }
+.setup-btn {
+  width: 100%;
+  padding: 12px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.setup-btn:hover { background: var(--accent-dark); }
+.setup-error { color: var(--red); font-size: 13px; margin-top: 8px; }
+
+/* ─── MOBILE ─── */
+@media (max-width: 768px) {
+  .nav { padding: 0 12px; }
+  .nav-brand { font-size: 17px; margin-right: 12px; }
+  .nav-tab { padding: 6px 10px; font-size: 12px; }
+  .view { padding: 16px; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .filters-bar { flex-direction: column; }
+  .filter-search { min-width: 100%; }
+  .count-label { margin-left: 0; }
+  td, th { padding: 8px 8px; font-size: 12px; }
+  .notes-input { width: 120px; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-brand">Sahiba <span>Tracker</span></div>
+  <div class="nav-tabs" id="navTabs">
+    <button class="nav-tab active" data-view="contacts">Contactos</button>
+    <button class="nav-tab" data-view="upload">Subir Lista</button>
+    <button class="nav-tab" data-view="stats">Resumen</button>
+  </div>
+  <div class="nav-right">
+    <button class="refresh-btn" onclick="loadContacts()">↻ Actualizar</button>
+    <div class="connection-dot" id="connDot" title="Desconectado"></div>
+  </div>
+</nav>
+
+<!-- SETUP (shown if no token stored) -->
+<div class="view" id="setupView">
+  <div class="setup-card">
+    <h2>Bienvenido</h2>
+    <p>Ingresa la URL de tu app y el token de acceso para conectarte.</p>
+    <input class="setup-input" id="setupUrl" type="text" placeholder="URL del sitio (ej: https://tu-app.netlify.app)">
+    <input class="setup-input" id="setupToken" type="password" placeholder="Token de acceso">
+    <button class="setup-btn" onclick="saveSetup()">Conectar</button>
+    <p class="setup-error" id="setupError"></p>
+  </div>
+</div>
+
+<!-- CONTACTS VIEW -->
+<div class="view" id="contactsView">
+  <div class="stats-row" id="quickStats"></div>
+  <div class="filters-bar">
+    <input class="filter-search" id="searchInput" type="text" placeholder="Buscar nombre o teléfono...">
+    <select class="filter-select" id="statusFilter">
+      <option value="all">Todos los estados</option>
+      <option value="Pendiente">Pendiente</option>
+      <option value="Contactada">Contactada</option>
+      <option value="Respondió">Respondió</option>
+      <option value="Sin Respuesta">Sin Respuesta</option>
+      <option value="Venta">Venta</option>
+      <option value="No Interesada">No Interesada</option>
+    </select>
+    <select class="filter-select" id="agentFilter">
+      <option value="all">Todos los agentes</option>
+    </select>
+    <span class="count-label" id="countLabel">0 contactos</span>
+  </div>
+  <div class="table-wrap">
+    <div class="table-scroll" id="tableScroll">
+      <div class="loading" id="contactsLoading"><div class="spinner"></div>Cargando contactos...</div>
+    </div>
+  </div>
+</div>
+
+<!-- UPLOAD VIEW -->
+<div class="view" id="uploadView">
+  <div class="upload-area">
+    <h2>📤 Subir Lista de Llamadas</h2>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Sube el archivo Excel diario. Los contactos nuevos se agregan automáticamente, los existentes se actualizan sin perder el status o notas.</p>
+    <div class="dropzone" id="uploadDropzone">
+      <h3>Arrastra tu archivo Excel aquí</h3>
+      <p>o haz clic para seleccionar · .xlsx</p>
+      <input type="file" id="uploadFileInput" accept=".xlsx,.xls">
+    </div>
+    <div class="upload-result" id="uploadResult"></div>
+  </div>
+</div>
+
+<!-- STATS VIEW -->
+<div class="view" id="statsView">
+  <div class="stats-row" id="fullStats"></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;">
+    <div class="upload-area" style="margin:0;">
+      <h2>Por Estado</h2>
+      <div id="statusBreakdown"></div>
+    </div>
+    <div class="upload-area" style="margin:0;">
+      <h2>Por Agente</h2>
+      <div id="agentBreakdown"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── CONFIG ───
+const STATUSES = ['Pendiente', 'Contactada', 'Respondió', 'Sin Respuesta', 'Venta', 'No Interesada'];
+const WA_MSG = 'Hola {nombre}, soy Nancy de Sahiba. Te escribo para dar seguimiento a tu interés en nuestra colección. Si ya estás listo(a), puedo ayudarte a completar tu pedido sin problema. También te comparto nuestro catálogo actualizado 😊';
+
+let API_BASE = '';
+let AUTH_TOKEN = '';
+let allContacts = [];
+let debounceTimer = null;
+
+// ─── SETUP ───
+function loadConfig() {
+  API_BASE = localStorage.getItem('sahiba_api_url') || '';
+  AUTH_TOKEN = localStorage.getItem('sahiba_token') || '';
+  if (API_BASE && AUTH_TOKEN) {
+    document.getElementById('setupView').style.display = 'none';
+    showView('contacts');
+    loadContacts();
+    return true;
+  } else {
+    document.getElementById('setupView').style.display = 'block';
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    return false;
+  }
+}
+
+async function saveSetup() {
+  const url = document.getElementById('setupUrl').value.trim().replace(/\/$/, '');
+  const token = document.getElementById('setupToken').value.trim();
+  const errEl = document.getElementById('setupError');
+
+  if (!url || !token) { errEl.textContent = 'Completa ambos campos.'; return; }
+
+  // Test connection
+  try {
+    errEl.textContent = 'Conectando...';
+    const res = await fetch(`${url}/.netlify/functions/api/init`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) throw new Error('Token inválido o URL incorrecta');
+    localStorage.setItem('sahiba_api_url', url);
+    localStorage.setItem('sahiba_token', token);
+    API_BASE = url;
+    AUTH_TOKEN = token;
+    document.getElementById('setupView').style.display = 'none';
+    showView('contacts');
+    loadContacts();
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+}
+
+// ─── API ───
+async function api(path, method = 'GET', body = null) {
+  const opts = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${AUTH_TOKEN}`,
+      'Content-Type': 'application/json'
+    }
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const url = `${API_BASE}/.netlify/functions/api${path}`;
+  const res = await fetch(url, opts);
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  const dot = document.getElementById('connDot');
+  dot.classList.add('connected');
+  dot.title = 'Conectado';
+  return res.json();
+}
+
+// ─── VIEWS ───
+function showView(name) {
+  document.querySelectorAll('.view:not(#setupView)').forEach(v => v.classList.remove('active'));
+  document.getElementById(name + 'View').classList.add('active');
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.view === name));
+  if (name === 'stats') loadStats();
+}
+
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', () => showView(tab.dataset.view));
+});
+
+// ─── CONTACTS ───
+async function loadContacts() {
+  const params = new URLSearchParams();
+  const status = document.getElementById('statusFilter').value;
+  const search = document.getElementById('searchInput').value.trim();
+  const agent = document.getElementById('agentFilter').value;
+  if (status !== 'all') params.set('status', status);
+  if (search) params.set('search', search);
+  if (agent !== 'all') params.set('agent', agent);
+
+  try {
+    const data = await api(`/contacts?${params.toString()}`);
+    allContacts = data;
+    renderContacts(data);
+  } catch (e) {
+    document.getElementById('tableScroll').innerHTML = `<div class="loading" style="color:var(--red)">Error: ${e.message}</div>`;
+  }
+}
+
+function renderContacts(contacts) {
+  document.getElementById('countLabel').textContent = `${contacts.length} contactos`;
+
+  // Populate agent filter
+  const agents = [...new Set(contacts.map(c => c.agent).filter(Boolean))].sort();
+  const agentSel = document.getElementById('agentFilter');
+  const curAgent = agentSel.value;
+  agentSel.innerHTML = '<option value="all">Todos los agentes</option>';
+  agents.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a; opt.textContent = a;
+    if (a === curAgent) opt.selected = true;
+    agentSel.appendChild(opt);
+  });
+
+  // Quick stats
+  const total = contacts.length;
+  const newC = contacts.filter(c => c.is_new).length;
+  const pending = contacts.filter(c => c.status === 'Pendiente').length;
+  const sales = contacts.filter(c => c.status === 'Venta').length;
+  document.getElementById('quickStats').innerHTML = `
+    <div class="stat-card"><div class="number">${total}</div><div class="label">Total</div></div>
+    <div class="stat-card new-card"><div class="number">${newC}</div><div class="label">Nuevos</div></div>
+    <div class="stat-card"><div class="number">${pending}</div><div class="label">Pendientes</div></div>
+    <div class="stat-card"><div class="number">${sales}</div><div class="label">Ventas</div></div>
+  `;
+
+  if (contacts.length === 0) {
+    document.getElementById('tableScroll').innerHTML = '<div class="loading">No hay contactos. Sube una lista primero.</div>';
+    return;
+  }
+
+  let html = `<table><thead><tr>
+    <th>Nombre</th><th>Teléfono</th><th>Score</th><th>Ciudad</th>
+    <th>Lifecycle</th><th>Prioridad</th><th>Estado</th>
+    <th>Notas</th><th>WhatsApp</th>
+  </tr></thead><tbody>`;
+
+  for (const c of contacts) {
+    const rowClass = c.is_new ? 'row-new' : '';
+    const waUrl = `https://wa.me/${c.phone}?text=${encodeURIComponent(WA_MSG.replace('{nombre}', c.name || ''))}`;
+    const sentClass = c.whatsapp_sent ? 'sent' : '';
+    const sentLabel = c.whatsapp_sent ? '✓ Enviado' : '💬 Enviar';
+
+    html += `<tr class="${rowClass}">
+      <td><strong>${esc(c.name || '')}</strong>${c.is_new ? '<span class="new-tag">NUEVO</span>' : ''}</td>
+      <td>${esc(c.phone || '')}</td>
+      <td>${c.crm_score || '—'}</td>
+      <td>${esc(c.city || '')}</td>
+      <td>${esc(c.lifecycle || '')}</td>
+      <td>${esc(c.priority || '')}</td>
+      <td>
+        <select class="inline-select" onchange="updateStatus(${c.id}, this.value)">
+          ${STATUSES.map(s => `<option value="${s}" ${s === c.status ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td><input class="notes-input" value="${esc(c.notes || '')}" onchange="updateNotes(${c.id}, this.value)" placeholder="Agregar nota..."></td>
+      <td>
+        <a class="wa-btn ${sentClass}" href="${waUrl}" target="_blank" onclick="markSent(${c.id}, this)">${sentLabel}</a>
+      </td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('tableScroll').innerHTML = html;
+}
+
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+async function updateStatus(id, status) {
+  try {
+    await api(`/contact/${id}`, 'PUT', { status });
+    const c = allContacts.find(x => x.id === id);
+    if (c) c.status = status;
+  } catch (e) {
+    alert('Error actualizando estado: ' + e.message);
+  }
+}
+
+async function updateNotes(id, notes) {
+  try {
+    await api(`/contact/${id}`, 'PUT', { notes });
+  } catch (e) {
+    alert('Error guardando nota: ' + e.message);
+  }
+}
+
+async function markSent(id, btn) {
+  try {
+    await api(`/contact/${id}`, 'PUT', { whatsapp_sent: true });
+    btn.classList.add('sent');
+    btn.textContent = '✓ Enviado';
+  } catch (e) { /* still opens WhatsApp */ }
+}
+
+// Debounced search
+document.getElementById('searchInput').addEventListener('input', () => {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(loadContacts, 400);
+});
+document.getElementById('statusFilter').addEventListener('change', loadContacts);
+document.getElementById('agentFilter').addEventListener('change', loadContacts);
+
+// ─── UPLOAD ───
+const uploadDZ = document.getElementById('uploadDropzone');
+const uploadInput = document.getElementById('uploadFileInput');
+uploadDZ.addEventListener('click', () => uploadInput.click());
+uploadDZ.addEventListener('dragover', e => { e.preventDefault(); uploadDZ.classList.add('dragover'); });
+uploadDZ.addEventListener('dragleave', () => uploadDZ.classList.remove('dragover'));
+uploadDZ.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadDZ.classList.remove('dragover');
+  if (e.dataTransfer.files.length) processUpload(e.dataTransfer.files[0]);
+});
+uploadInput.addEventListener('change', e => {
+  if (e.target.files.length) processUpload(e.target.files[0]);
+});
+
+async function processUpload(file) {
+  const resultEl = document.getElementById('uploadResult');
+  resultEl.className = 'upload-result';
+  resultEl.style.display = 'block';
+  resultEl.textContent = 'Procesando archivo...';
+
+  try {
+    const data = await readExcel(file);
+    const result = await api('/upload', 'POST', { contacts: data });
+    resultEl.className = 'upload-result success';
+    resultEl.innerHTML = `<strong>✓ Listo!</strong> ${result.newCount} contactos nuevos agregados, ${result.updatedCount} existentes actualizados. Total procesados: ${result.total}`;
+    loadContacts();
+  } catch (e) {
+    resultEl.className = 'upload-result error';
+    resultEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+function readExcel(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        const headers = rows[0] || [];
+
+        // Map header names to indices (flexible)
+        const hMap = {};
+        headers.forEach((h, i) => { hMap[String(h).toLowerCase().trim()] = i; });
+
+        const contacts = [];
+        for (let i = 1; i < rows.length; i++) {
+          const r = rows[i];
+          if (!r || !r.length) continue;
+          const phone = String(r[hMap['phone'] ?? 3] || '').replace(/[^0-9]/g, '');
+          if (!phone) continue;
+          contacts.push({
+            phone,
+            name: r[hMap['name'] ?? 2] || '',
+            buy_score: r[hMap['buy_score'] ?? 0] || null,
+            window: r[hMap['window'] ?? 1] || '',
+            agent: r[hMap['agent'] ?? 4] || '',
+            city: r[hMap['city'] ?? 5] || '',
+            lifecycle: r[hMap['lifecycle'] ?? 6] || '',
+            reasons: r[hMap['reasons'] ?? 7] || '',
+            hours_since: r[hMap['hours_since'] ?? 8] || null,
+            crm_score: r[hMap['crm_score'] ?? 9] || null,
+            priority: r[hMap['priority'] ?? 10] || ''
+          });
+        }
+        resolve(contacts);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error('Error leyendo archivo'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// ─── STATS ───
+async function loadStats() {
+  try {
+    const stats = await api('/stats');
+    document.getElementById('fullStats').innerHTML = `
+      <div class="stat-card"><div class="number">${stats.total}</div><div class="label">Total Contactos</div></div>
+      <div class="stat-card new-card"><div class="number">${stats.newToday}</div><div class="label">Nuevos (último upload)</div></div>
+    `;
+
+    let statusHtml = '';
+    for (const s of stats.byStatus) {
+      const pct = stats.total > 0 ? Math.round((s.count / stats.total) * 100) : 0;
+      statusHtml += `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+        <span class="status-badge status-${s.status}" style="min-width:110px;text-align:center;">${s.status}</span>
+        <div style="flex:1;height:6px;background:var(--bg);border-radius:3px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:var(--accent);border-radius:3px;"></div>
+        </div>
+        <span style="font-weight:600;min-width:40px;text-align:right;">${s.count}</span>
+      </div>`;
+    }
+    document.getElementById('statusBreakdown').innerHTML = statusHtml;
+
+    let agentHtml = '';
+    for (const a of stats.byAgent) {
+      if (!a.agent) continue;
+      agentHtml += `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
+        <span style="font-weight:500;">${a.agent}</span>
+        <span style="font-weight:600;">${a.count}</span>
+      </div>`;
+    }
+    document.getElementById('agentBreakdown').innerHTML = agentHtml || '<p style="color:var(--text-muted);padding:8px;">Sin datos</p>';
+  } catch (e) {
+    document.getElementById('fullStats').innerHTML = `<p style="color:var(--red)">Error cargando estadísticas: ${e.message}</p>`;
+  }
+}
+
+// ─── INIT ───
+loadConfig();
+</script>
+</body>
+</html>
