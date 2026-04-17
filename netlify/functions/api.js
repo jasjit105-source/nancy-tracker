@@ -41,11 +41,13 @@ async function getNancyContacts(filters) {
   const q = db();
   const { status, search } = filters || {};
 
+  const cols = `id, phone, name, buy_score, win_status, agent, city, lifecycle, reasons, hours_since, crm_score, priority, status, notes, whatsapp_sent, COALESCE(whatsapp_sent_date, NULL)::timestamp as whatsapp_sent_date, date_added, date_updated, is_new, batch_date`;
+
   // Nancy's own contacts
-  let sql1 = `SELECT *, 'nancy' as source FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
+  let sql1 = `SELECT ${cols}, 'nancy' as source FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
 
   // Jazmin's aged-out non-customers, excluding phones already in nancy_contacts
-  let sql2 = `SELECT *, 'jazmin_handoff' as source FROM jazmin_contacts WHERE hours_since >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
+  let sql2 = `SELECT ${cols}, 'jazmin_handoff' as source FROM jazmin_contacts WHERE hours_since >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
 
   let sql = `SELECT * FROM ((${sql1}) UNION ALL (${sql2})) combined WHERE 1=1`;
   const p = []; let i = 1;
