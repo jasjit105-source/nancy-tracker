@@ -1,288 +1,214 @@
 const { neon } = require("@neondatabase/serverless");
 
-function sql() {
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) throw new Error("DATABASE_URL not set in environment");
-  return neon(dbUrl);
+function db() {
+  const u = process.env.DATABASE_URL;
+  if (!u) throw new Error("DATABASE_URL not set");
+  return neon(u);
 }
 
+function tbl(a) { return a === 'jazmin' ? 'jazmin_contacts' : 'nancy_contacts'; }
+function htbl(a) { return a === 'jazmin' ? 'jazmin_historial' : 'nancy_historial'; }
+function validAgent(a) { return ['nancy','jazmin'].includes((a||'').toLowerCase()) ? a.toLowerCase() : null; }
+
 async function initDB() {
-  const db = sql();
-  await db`
-    CREATE TABLE IF NOT EXISTS nancy_contacts (
-      id SERIAL PRIMARY KEY,
-      phone VARCHAR(20) UNIQUE NOT NULL,
-      name VARCHAR(200),
-      buy_score INTEGER,
-      win_status VARCHAR(50),
-      agent VARCHAR(100),
-      city VARCHAR(200),
-      lifecycle VARCHAR(100),
-      reasons TEXT,
-      hours_since INTEGER,
-      crm_score INTEGER,
-      priority VARCHAR(10),
-      status VARCHAR(50) DEFAULT 'Pendiente',
-      notes TEXT DEFAULT '',
-      whatsapp_sent BOOLEAN DEFAULT FALSE,
-      date_added TIMESTAMP DEFAULT NOW(),
-      date_updated TIMESTAMP DEFAULT NOW(),
-      is_new BOOLEAN DEFAULT TRUE,
-      batch_date DATE DEFAULT CURRENT_DATE
-    )
-  `;
-  await db`
-    CREATE TABLE IF NOT EXISTS nancy_historial (
-      id SERIAL PRIMARY KEY,
-      phone VARCHAR(20) NOT NULL,
-      name VARCHAR(200),
-      agent VARCHAR(100),
-      city VARCHAR(200),
-      lifecycle VARCHAR(100),
-      crm_score INTEGER,
-      status VARCHAR(50),
-      notes TEXT,
-      whatsapp_sent BOOLEAN DEFAULT FALSE,
-      date_added TIMESTAMP,
-      date_archived TIMESTAMP DEFAULT NOW()
-    )
-  `;
-  await db`CREATE INDEX IF NOT EXISTS idx_nancy_phone ON nancy_contacts(phone)`;
-  await db`CREATE INDEX IF NOT EXISTS idx_nancy_status ON nancy_contacts(status)`;
-  await db`CREATE INDEX IF NOT EXISTS idx_historial_phone ON nancy_historial(phone)`;
+  const q = db();
+  for (const t of ['nancy_contacts','jazmin_contacts']) {
+    await q(`CREATE TABLE IF NOT EXISTS ${t} (id SERIAL PRIMARY KEY, phone VARCHAR(20) UNIQUE NOT NULL, name VARCHAR(200), buy_score INTEGER, win_status VARCHAR(50), agent VARCHAR(100), city VARCHAR(200), lifecycle VARCHAR(100), reasons TEXT, hours_since INTEGER, crm_score INTEGER, priority VARCHAR(10), status VARCHAR(50) DEFAULT 'Pendiente', notes TEXT DEFAULT '', whatsapp_sent BOOLEAN DEFAULT FALSE, whatsapp_sent_date TIMESTAMP, date_added TIMESTAMP DEFAULT NOW(), date_updated TIMESTAMP DEFAULT NOW(), is_new BOOLEAN DEFAULT TRUE, batch_date DATE DEFAULT CURRENT_DATE)`);
+  }
+  for (const t of ['nancy_historial','jazmin_historial']) {
+    await q(`CREATE TABLE IF NOT EXISTS ${t} (id SERIAL PRIMARY KEY, phone VARCHAR(20) NOT NULL, name VARCHAR(200), agent VARCHAR(100), city VARCHAR(200), lifecycle VARCHAR(100), crm_score INTEGER, status VARCHAR(50), notes TEXT, whatsapp_sent BOOLEAN DEFAULT FALSE, whatsapp_sent_date TIMESTAMP, date_added TIMESTAMP, date_archived TIMESTAMP DEFAULT NOW())`);
+  }
+  for (const t of ['nancy_contacts','jazmin_contacts','nancy_historial','jazmin_historial']) {
+    try { await q(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS whatsapp_sent_date TIMESTAMP`); } catch(e) {}
+  }
   return { success: true };
 }
 
-async function getContacts(filters) {
-  const db = sql();
-  const { status, search, agent, view } = filters || {};
-
-  // Default view excludes Customer lifecycle
-  let query = `SELECT * FROM nancy_contacts WHERE 1=1`;
-  const params = [];
-  let paramIdx = 1;
-
-  if (view !== 'all') {
-    query += ` AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer')`;
-    query += ` AND (crm_score IS NULL OR crm_score >= 400)`;
-  }
-
-  if (status && status !== "all") {
-    query += ` AND status = $${paramIdx++}`;
-    params.push(status);
-  }
-  if (agent && agent !== "all") {
-    query += ` AND agent = $${paramIdx++}`;
-    params.push(agent);
-  }
-  if (search) {
-    query += ` AND (name ILIKE $${paramIdx} OR phone ILIKE $${paramIdx})`;
-    params.push(`%${search}%`);
-    paramIdx++;
-  }
-
-  query += ` ORDER BY is_new DESC, crm_score DESC NULLS LAST, date_added DESC`;
-
-  const result = await db(query, params);
-  return result;
+// JAZMIN VIEW: her contacts < 85hrs OR her customers (any age)
+async function getJazminContacts(filters) {
+  const q = db();
+  const { status, search } = filters || {};
+  let sql = `SELECT *, 'jazmin' as source FROM jazmin_contacts WHERE (crm_score IS NULL OR crm_score >= 400) AND ((hours_since IS NULL OR hours_since < 85) OR (lifecycle IS NOT NULL AND LOWER(lifecycle) = 'customer'))`;
+  const p = []; let i = 1;
+  if (status && status !== 'all') { sql += ` AND status = $${i++}`; p.push(status); }
+  if (search) { sql += ` AND (name ILIKE $${i} OR phone ILIKE $${i})`; p.push('%'+search+'%'); i++; }
+  sql += ` ORDER BY is_new DESC, crm_score DESC NULLS LAST, date_added DESC`;
+  return await q(sql, p);
 }
 
-async function getHistorial(filters) {
-  const db = sql();
+// NANCY VIEW: her own contacts (not customers, score>=400) + jazmin contacts >=85hrs that are NOT customers and NOT already in nancy's table
+async function getNancyContacts(filters) {
+  const q = db();
+  const { status, search } = filters || {};
+
+  // Nancy's own contacts
+  let sql1 = `SELECT *, 'nancy' as source FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
+
+  // Jazmin's aged-out non-customers, excluding phones already in nancy_contacts
+  let sql2 = `SELECT *, 'jazmin_handoff' as source FROM jazmin_contacts WHERE hours_since >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
+
+  let sql = `SELECT * FROM ((${sql1}) UNION ALL (${sql2})) combined WHERE 1=1`;
+  const p = []; let i = 1;
+  if (status && status !== 'all') { sql += ` AND status = $${i++}`; p.push(status); }
+  if (search) { sql += ` AND (name ILIKE $${i} OR phone ILIKE $${i})`; p.push('%'+search+'%'); i++; }
+  sql += ` ORDER BY is_new DESC, crm_score DESC NULLS LAST, date_added DESC`;
+  return await q(sql, p);
+}
+
+async function getContacts(agent, filters) {
+  if (agent === 'jazmin') return getJazminContacts(filters);
+  return getNancyContacts(filters);
+}
+
+async function getHistorial(agent, filters) {
+  const q = db();
+  const t = htbl(agent);
   const { search } = filters || {};
-
-  let query = `SELECT * FROM nancy_historial WHERE 1=1`;
-  const params = [];
-  let paramIdx = 1;
-
-  if (search) {
-    query += ` AND (name ILIKE $${paramIdx} OR phone ILIKE $${paramIdx})`;
-    params.push(`%${search}%`);
-    paramIdx++;
-  }
-
-  query += ` ORDER BY date_archived DESC`;
-
-  const result = await db(query, params);
-  return result;
+  let sql = `SELECT * FROM ${t} WHERE 1=1`;
+  const p = []; let i = 1;
+  if (search) { sql += ` AND (name ILIKE $${i} OR phone ILIKE $${i})`; p.push('%'+search+'%'); i++; }
+  sql += ` ORDER BY date_archived DESC`;
+  return await q(sql, p);
 }
 
-async function uploadContacts(contacts) {
-  const db = sql();
-  let newCount = 0;
-  let updatedCount = 0;
-  let archivedCount = 0;
-  let skippedCustomers = 0;
-  let skippedLowScore = 0;
+async function uploadContacts(agent, contacts) {
+  const q = db();
+  const t = tbl(agent);
+  const ht = htbl(agent);
+  let newCount=0, updatedCount=0, archivedCount=0, skippedCount=0, cleanedCount=0;
 
-  // Before merge: archive contacts that have notes to historial
-  const withNotes = await db`SELECT * FROM nancy_contacts WHERE notes IS NOT NULL AND notes != ''`;
+  // Archive contacts with notes
+  const withNotes = await q(`SELECT * FROM ${t} WHERE notes IS NOT NULL AND notes != ''`);
   for (const c of withNotes) {
-    await db`
-      INSERT INTO nancy_historial (phone, name, agent, city, lifecycle, crm_score, status, notes, whatsapp_sent, date_added)
-      VALUES (${c.phone}, ${c.name}, ${c.agent}, ${c.city}, ${c.lifecycle}, ${c.crm_score}, ${c.status}, ${c.notes}, ${c.whatsapp_sent}, ${c.date_added})
-    `;
+    await q(`INSERT INTO ${ht} (phone,name,agent,city,lifecycle,crm_score,status,notes,whatsapp_sent,whatsapp_sent_date,date_added) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [c.phone,c.name,c.agent,c.city,c.lifecycle,c.crm_score,c.status,c.notes,c.whatsapp_sent,c.whatsapp_sent_date,c.date_added]);
     archivedCount++;
   }
 
-  // Clean out existing Customers and low-score contacts
-  const cleanedCustomers = await db`DELETE FROM nancy_contacts WHERE lifecycle IS NOT NULL AND LOWER(lifecycle) = 'customer' RETURNING id`;
-  const cleanedLowScore = await db`DELETE FROM nancy_contacts WHERE crm_score IS NOT NULL AND crm_score < 400 RETURNING id`;
-  const cleanedCount = cleanedCustomers.length + cleanedLowScore.length;
+  // Clean existing low score (but keep customers for their own agent)
+  const c2 = await q(`DELETE FROM ${t} WHERE crm_score IS NOT NULL AND crm_score < 400 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') RETURNING id`);
+  cleanedCount = c2.length;
 
-  // Mark all existing as not new before merge
-  await db`UPDATE nancy_contacts SET is_new = FALSE WHERE is_new = TRUE`;
+  // Mark not new
+  await q(`UPDATE ${t} SET is_new = FALSE WHERE is_new = TRUE`);
 
   for (const c of contacts) {
-    const phone = String(c.phone || "").replace(/[^0-9]/g, "");
+    const phone = String(c.phone||'').replace(/[^0-9]/g,'');
     if (!phone) continue;
+    const isCustomer = c.lifecycle && String(c.lifecycle).toLowerCase().trim() === 'customer';
+    // Skip non-customer low scores
+    if (!isCustomer && c.crm_score && Number(c.crm_score) < 400) { skippedCount++; continue; }
 
-    // Skip customers
-    if (c.lifecycle && String(c.lifecycle).toLowerCase().trim() === 'customer') {
-      skippedCustomers++;
-      continue;
-    }
-
-    // Skip low score (below 400)
-    if (c.crm_score && Number(c.crm_score) < 400) {
-      skippedLowScore++;
-      continue;
-    }
-
-    const existing = await db`SELECT id, status FROM nancy_contacts WHERE phone = ${phone}`;
-
+    const existing = await q(`SELECT id FROM ${t} WHERE phone = $1`, [phone]);
     if (existing.length > 0) {
-      await db`
-        UPDATE nancy_contacts SET
-          name = ${c.name || null},
-          buy_score = ${c.buy_score || null},
-          win_status = ${c.window || null},
-          agent = ${c.agent || null},
-          city = ${c.city || null},
-          lifecycle = ${c.lifecycle || null},
-          reasons = ${c.reasons || null},
-          hours_since = ${c.hours_since || null},
-          crm_score = ${c.crm_score || null},
-          priority = ${c.priority || null},
-          date_updated = NOW(),
-          batch_date = CURRENT_DATE
-        WHERE phone = ${phone}
-      `;
+      await q(`UPDATE ${t} SET name=$1,buy_score=$2,win_status=$3,agent=$4,city=$5,lifecycle=$6,reasons=$7,hours_since=$8,crm_score=$9,priority=$10,date_updated=NOW(),batch_date=CURRENT_DATE WHERE phone=$11`,
+        [c.name||null,c.buy_score||null,c.window||null,c.agent||null,c.city||null,c.lifecycle||null,c.reasons||null,c.hours_since||null,c.crm_score||null,c.priority||null,phone]);
       updatedCount++;
     } else {
-      await db`
-        INSERT INTO nancy_contacts (phone, name, buy_score, win_status, agent, city, lifecycle, reasons, hours_since, crm_score, priority, status, is_new, batch_date)
-        VALUES (${phone}, ${c.name || null}, ${c.buy_score || null}, ${c.window || null}, ${c.agent || null}, ${c.city || null}, ${c.lifecycle || null}, ${c.reasons || null}, ${c.hours_since || null}, ${c.crm_score || null}, ${c.priority || null}, 'Pendiente', TRUE, CURRENT_DATE)
-      `;
+      await q(`INSERT INTO ${t} (phone,name,buy_score,win_status,agent,city,lifecycle,reasons,hours_since,crm_score,priority,status,is_new,batch_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Pendiente',TRUE,CURRENT_DATE)`,
+        [phone,c.name||null,c.buy_score||null,c.window||null,c.agent||null,c.city||null,c.lifecycle||null,c.reasons||null,c.hours_since||null,c.crm_score||null,c.priority||null]);
       newCount++;
     }
   }
-
-  return { newCount, updatedCount, archivedCount, skippedCustomers, skippedLowScore, cleanedCount, total: contacts.length };
+  return { newCount, updatedCount, archivedCount, skippedCount, cleanedCount, total: contacts.length };
 }
 
-async function updateContact(id, updates) {
-  const db = sql();
+async function updateContact(agent, id, updates) {
+  const q = db();
+  // Figure out which table this contact lives in
+  // For nancy view, the contact might be in jazmin_contacts (handoff)
+  let t = tbl(agent);
+  if (agent === 'nancy') {
+    const inNancy = await q(`SELECT id FROM nancy_contacts WHERE id = $1`, [id]);
+    if (inNancy.length === 0) {
+      t = 'jazmin_contacts'; // it's a handoff contact
+    }
+  }
+
   const { status, notes, whatsapp_sent } = updates;
-
-  await db`
-    UPDATE nancy_contacts SET
-      status = COALESCE(${status || null}, status),
-      notes = COALESCE(${notes !== undefined ? notes : null}, notes),
-      whatsapp_sent = COALESCE(${whatsapp_sent !== undefined ? whatsapp_sent : null}, whatsapp_sent),
-      date_updated = NOW()
-    WHERE id = ${id}
-  `;
-
+  let sets = ['date_updated = NOW()'], p = [], i = 1;
+  if (status) { sets.push(`status = $${i++}`); p.push(status); }
+  if (notes !== undefined) { sets.push(`notes = $${i++}`); p.push(notes); }
+  if (whatsapp_sent !== undefined) { sets.push(`whatsapp_sent = $${i++}`); p.push(whatsapp_sent); if (whatsapp_sent) sets.push('whatsapp_sent_date = NOW()'); }
+  p.push(id);
+  await q(`UPDATE ${t} SET ${sets.join(', ')} WHERE id = $${i}`, p);
   return { success: true };
 }
 
-async function getStats() {
-  const db = sql();
-  const total = await db`SELECT COUNT(*) as count FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
-  const byStatus = await db`SELECT status, COUNT(*) as count FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) GROUP BY status ORDER BY count DESC`;
-  const newToday = await db`SELECT COUNT(*) as count FROM nancy_contacts WHERE is_new = TRUE AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
-  const byAgent = await db`SELECT agent, COUNT(*) as count FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) GROUP BY agent ORDER BY count DESC`;
-  const historialCount = await db`SELECT COUNT(*) as count FROM nancy_historial`;
-  return {
-    total: total[0].count,
-    newToday: newToday[0].count,
-    byStatus,
-    byAgent,
-    historialCount: historialCount[0].count
-  };
+async function getStats(agent) {
+  const q = db();
+  if (agent === 'jazmin') {
+    const f = `(crm_score IS NULL OR crm_score >= 400) AND ((hours_since IS NULL OR hours_since < 85) OR (lifecycle IS NOT NULL AND LOWER(lifecycle) = 'customer'))`;
+    const total = await q(`SELECT COUNT(*) as count FROM jazmin_contacts WHERE ${f}`);
+    const byStatus = await q(`SELECT status, COUNT(*) as count FROM jazmin_contacts WHERE ${f} GROUP BY status ORDER BY count DESC`);
+    const newToday = await q(`SELECT COUNT(*) as count FROM jazmin_contacts WHERE is_new = TRUE AND ${f}`);
+    const byAgent = await q(`SELECT agent, COUNT(*) as count FROM jazmin_contacts WHERE ${f} GROUP BY agent ORDER BY count DESC`);
+    const histCount = await q(`SELECT COUNT(*) as count FROM jazmin_historial`);
+    return { total: total[0].count, newToday: newToday[0].count, byStatus, byAgent, historialCount: histCount[0].count };
+  }
+  // Nancy stats: her contacts + jazmin handoffs
+  const nf = `(lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
+  const jf = `hours_since >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
+  const total1 = await q(`SELECT COUNT(*) as count FROM nancy_contacts WHERE ${nf}`);
+  const total2 = await q(`SELECT COUNT(*) as count FROM jazmin_contacts WHERE ${jf}`);
+  const totalCount = parseInt(total1[0].count) + parseInt(total2[0].count);
+
+  const byStatus = await q(`SELECT status, SUM(cnt)::int as count FROM (SELECT status, COUNT(*) as cnt FROM nancy_contacts WHERE ${nf} GROUP BY status UNION ALL SELECT status, COUNT(*) as cnt FROM jazmin_contacts WHERE ${jf} GROUP BY status) sub GROUP BY status ORDER BY count DESC`);
+  const newN = await q(`SELECT COUNT(*) as count FROM nancy_contacts WHERE is_new = TRUE AND ${nf}`);
+  const newJ = await q(`SELECT COUNT(*) as count FROM jazmin_contacts WHERE is_new = TRUE AND ${jf}`);
+  const newCount = parseInt(newN[0].count) + parseInt(newJ[0].count);
+
+  const byAgent = await q(`SELECT agent, SUM(cnt)::int as count FROM (SELECT agent, COUNT(*) as cnt FROM nancy_contacts WHERE ${nf} GROUP BY agent UNION ALL SELECT agent, COUNT(*) as cnt FROM jazmin_contacts WHERE ${jf} GROUP BY agent) sub GROUP BY agent ORDER BY count DESC`);
+  const histCount = await q(`SELECT COUNT(*) as count FROM nancy_historial`);
+  return { total: totalCount, newToday: newCount, byStatus, byAgent, historialCount: histCount[0].count };
 }
 
 exports.handler = async (event) => {
-  const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Content-Type": "application/json"
-  };
+  const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Content-Type': 'application/json' };
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
 
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 200, headers, body: "" };
-  }
-
-  const authHeader = event.headers.authorization || event.headers.Authorization || "";
-  const token = authHeader.replace("Bearer ", "");
-  const validToken = process.env.APP_TOKEN || "sahiba2026";
-
-  if (token !== validToken) {
-    return {
-      statusCode: 401,
-      headers,
-      body: JSON.stringify({ error: "No autorizado" })
-    };
+  const authHeader = event.headers.authorization || event.headers.Authorization || '';
+  if (authHeader.replace('Bearer ', '') !== (process.env.APP_TOKEN || 'sahiba2026')) {
+    return { statusCode: 401, headers, body: JSON.stringify({ error: 'No autorizado' }) };
   }
 
   try {
-    const path = event.path.replace("/.netlify/functions/api", "").replace("/api", "") || "/";
+    const path = event.path.replace('/.netlify/functions/api', '').replace('/api', '') || '/';
     const method = event.httpMethod;
+    const qs = event.queryStringParameters || {};
 
-    if (method === "POST" && path === "/init") {
-      const result = await initDB();
-      return { statusCode: 200, headers, body: JSON.stringify(result) };
+    if (method === 'POST' && path === '/init') return { statusCode: 200, headers, body: JSON.stringify(await initDB()) };
+
+    const agent = validAgent(qs.agent || (method !== 'GET' ? (JSON.parse(event.body || '{}').agent) : null));
+
+    if (method === 'GET' && path === '/contacts') {
+      if (!agent) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
+      return { statusCode: 200, headers, body: JSON.stringify(await getContacts(agent, qs)) };
     }
-
-    if (method === "GET" && path === "/contacts") {
-      const params = event.queryStringParameters || {};
-      const result = await getContacts(params);
-      return { statusCode: 200, headers, body: JSON.stringify(result) };
+    if (method === 'GET' && path === '/historial') {
+      if (!agent) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
+      return { statusCode: 200, headers, body: JSON.stringify(await getHistorial(agent, qs)) };
     }
-
-    if (method === "GET" && path === "/historial") {
-      const params = event.queryStringParameters || {};
-      const result = await getHistorial(params);
-      return { statusCode: 200, headers, body: JSON.stringify(result) };
-    }
-
-    if (method === "POST" && path === "/upload") {
+    if (method === 'POST' && path === '/upload') {
       const body = JSON.parse(event.body);
-      const result = await uploadContacts(body.contacts || []);
-      return { statusCode: 200, headers, body: JSON.stringify(result) };
+      const a = validAgent(body.agent);
+      if (!a) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
+      return { statusCode: 200, headers, body: JSON.stringify(await uploadContacts(a, body.contacts || [])) };
     }
-
-    if (method === "PUT" && path.startsWith("/contact/")) {
-      const id = parseInt(path.split("/").pop());
+    if (method === 'PUT' && path.startsWith('/contact/')) {
+      const id = parseInt(path.split('/').pop());
       const body = JSON.parse(event.body);
-      const result = await updateContact(id, body);
-      return { statusCode: 200, headers, body: JSON.stringify(result) };
+      const a = validAgent(body.agent || qs.agent);
+      if (!a) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
+      return { statusCode: 200, headers, body: JSON.stringify(await updateContact(a, id, body)) };
     }
-
-    if (method === "GET" && path === "/stats") {
-      const result = await getStats();
-      return { statusCode: 200, headers, body: JSON.stringify(result) };
+    if (method === 'GET' && path === '/stats') {
+      if (!agent) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
+      return { statusCode: 200, headers, body: JSON.stringify(await getStats(agent)) };
     }
-
-    return { statusCode: 404, headers, body: JSON.stringify({ error: "Not found" }) };
+    return { statusCode: 404, headers, body: JSON.stringify({ error: 'Not found' }) };
   } catch (err) {
-    console.error("Function error:", err);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: err.message, type: err.constructor.name })
-    };
+    console.error('Error:', err);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message, type: err.constructor.name }) };
   }
 };
