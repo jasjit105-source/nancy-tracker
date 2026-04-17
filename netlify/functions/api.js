@@ -64,6 +64,7 @@ async function getContacts(filters) {
 
   if (view !== 'all') {
     query += ` AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer')`;
+    query += ` AND (crm_score IS NULL OR crm_score >= 400)`;
   }
 
   if (status && status !== "all") {
@@ -112,6 +113,7 @@ async function uploadContacts(contacts) {
   let updatedCount = 0;
   let archivedCount = 0;
   let skippedCustomers = 0;
+  let skippedLowScore = 0;
 
   // Before merge: archive contacts that have notes to historial
   const withNotes = await db`SELECT * FROM nancy_contacts WHERE notes IS NOT NULL AND notes != ''`;
@@ -123,6 +125,11 @@ async function uploadContacts(contacts) {
     archivedCount++;
   }
 
+  // Clean out existing Customers and low-score contacts
+  const cleanedCustomers = await db`DELETE FROM nancy_contacts WHERE lifecycle IS NOT NULL AND LOWER(lifecycle) = 'customer' RETURNING id`;
+  const cleanedLowScore = await db`DELETE FROM nancy_contacts WHERE crm_score IS NOT NULL AND crm_score < 400 RETURNING id`;
+  const cleanedCount = cleanedCustomers.length + cleanedLowScore.length;
+
   // Mark all existing as not new before merge
   await db`UPDATE nancy_contacts SET is_new = FALSE WHERE is_new = TRUE`;
 
@@ -133,6 +140,12 @@ async function uploadContacts(contacts) {
     // Skip customers
     if (c.lifecycle && String(c.lifecycle).toLowerCase().trim() === 'customer') {
       skippedCustomers++;
+      continue;
+    }
+
+    // Skip low score (below 400)
+    if (c.crm_score && Number(c.crm_score) < 400) {
+      skippedLowScore++;
       continue;
     }
 
@@ -165,7 +178,7 @@ async function uploadContacts(contacts) {
     }
   }
 
-  return { newCount, updatedCount, archivedCount, skippedCustomers, total: contacts.length };
+  return { newCount, updatedCount, archivedCount, skippedCustomers, skippedLowScore, cleanedCount, total: contacts.length };
 }
 
 async function updateContact(id, updates) {
@@ -186,10 +199,10 @@ async function updateContact(id, updates) {
 
 async function getStats() {
   const db = sql();
-  const total = await db`SELECT COUNT(*) as count FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer')`;
-  const byStatus = await db`SELECT status, COUNT(*) as count FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') GROUP BY status ORDER BY count DESC`;
-  const newToday = await db`SELECT COUNT(*) as count FROM nancy_contacts WHERE is_new = TRUE AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer')`;
-  const byAgent = await db`SELECT agent, COUNT(*) as count FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') GROUP BY agent ORDER BY count DESC`;
+  const total = await db`SELECT COUNT(*) as count FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
+  const byStatus = await db`SELECT status, COUNT(*) as count FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) GROUP BY status ORDER BY count DESC`;
+  const newToday = await db`SELECT COUNT(*) as count FROM nancy_contacts WHERE is_new = TRUE AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
+  const byAgent = await db`SELECT agent, COUNT(*) as count FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) GROUP BY agent ORDER BY count DESC`;
   const historialCount = await db`SELECT COUNT(*) as count FROM nancy_historial`;
   return {
     total: total[0].count,
