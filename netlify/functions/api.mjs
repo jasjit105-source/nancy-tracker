@@ -32,6 +32,8 @@ async function initDB() {
   }
   // Records which agent a contact was handed off from (e.g. 'jazmin')
   try { await q(`ALTER TABLE nancy_contacts ADD COLUMN IF NOT EXISTS handoff_from VARCHAR(20)`); } catch(e) {}
+  // Nancy Hot & Payment list (separate from the daily call lists)
+  await q(`CREATE TABLE IF NOT EXISTS hot_contacts (id SERIAL PRIMARY KEY, phone VARCHAR(20) UNIQUE NOT NULL, name VARCHAR(200), city VARCHAR(200), region VARCHAR(100), tag_bucket TEXT, score INTEGER, why TEXT, lifecycle VARCHAR(100), intent_score INTEGER, inbound_msgs INTEGER, photos INTEGER, last_inbound TIMESTAMP, last_ask TEXT, status VARCHAR(50) DEFAULT 'Pendiente', notes TEXT DEFAULT '', whatsapp_sent BOOLEAN DEFAULT FALSE, whatsapp_sent_date TIMESTAMP, unlocked_date DATE, sort_order INTEGER, date_added TIMESTAMP DEFAULT NOW(), date_updated TIMESTAMP DEFAULT NOW())`);
   return { success: true };
 }
 
@@ -287,6 +289,100 @@ async function getStats(agent) {
   return { total: totalCount, newToday: newCount, byStatus, byAgent, historialCount: histCount[0].count };
 }
 
+// ===== NANCY HOT & PAYMENT LIST =====
+// Separate list (hot_contacts). Every day HOT_DAILY_LIMIT locked contacts are
+// unlocked (highest score first) for Nancy; WhatsApp sends are only accepted
+// for contacts unlocked today. Days are Mexico City days.
+const HOT_DAILY_LIMIT = parseInt(process.env.HOT_DAILY_LIMIT || '5', 10);
+const MX_TODAY = `(NOW() AT TIME ZONE 'America/Mexico_City')::date`;
+const MX_DATE = (col) => `((${col} AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date`;
+
+async function unlockHotDaily() {
+  const q = db();
+  const c = await q(`SELECT COUNT(*)::int AS n FROM hot_contacts WHERE unlocked_date = ${MX_TODAY}`);
+  const need = HOT_DAILY_LIMIT - c[0].n;
+  if (need <= 0) return 0;
+  const r = await q(`UPDATE hot_contacts SET unlocked_date = ${MX_TODAY}, date_updated = NOW() WHERE id IN (SELECT id FROM hot_contacts WHERE unlocked_date IS NULL ORDER BY score DESC NULLS LAST, sort_order ASC NULLS LAST, id ASC LIMIT $1) RETURNING id`, [need]);
+  return r.length;
+}
+
+const hotCols = `id, phone, name, city, region, tag_bucket, score, why, lifecycle, intent_score, inbound_msgs, photos, last_inbound, last_ask, status, notes, whatsapp_sent, whatsapp_sent_date, unlocked_date, ROUND(EXTRACT(EPOCH FROM (NOW() - last_inbound))/3600)::int AS hours_since, (unlocked_date = ${MX_TODAY}) AS is_today, (whatsapp_sent_date IS NOT NULL AND ${MX_DATE('whatsapp_sent_date')} = ${MX_TODAY}) AS sent_today`;
+
+async function getHotContacts(qs) {
+  const q = db();
+  await unlockHotDaily();
+  const { mode, status, search } = qs || {};
+  const p = []; let i = 1; let where = 'WHERE 1=1';
+  if (status && status !== 'all') { where += ` AND status = $${i++}`; p.push(status); }
+  if (search) { where += ` AND (name ILIKE $${i} OR phone ILIKE $${i} OR city ILIKE $${i})`; p.push('%' + search + '%'); i++; }
+  if (mode !== 'all') where += ' AND unlocked_date IS NOT NULL';
+  const rows = await q(`SELECT ${hotCols} FROM hot_contacts ${where} ORDER BY unlocked_date DESC NULLS LAST, score DESC NULLS LAST, sort_order ASC NULLS LAST, id ASC`, p);
+  const counts = await q(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE unlocked_date IS NULL)::int AS locked, COUNT(*) FILTER (WHERE unlocked_date = ${MX_TODAY})::int AS today, COUNT(*) FILTER (WHERE whatsapp_sent_date IS NOT NULL AND ${MX_DATE('whatsapp_sent_date')} = ${MX_TODAY})::int AS sent_today, COUNT(*) FILTER (WHERE status = 'Venta')::int AS sales FROM hot_contacts`);
+  return {
+    limit: HOT_DAILY_LIMIT,
+    today: rows.filter(r => r.is_today),
+    earlier: rows.filter(r => !r.is_today && r.unlocked_date),
+    locked: rows.filter(r => !r.unlocked_date),
+    counts: counts[0],
+  };
+}
+
+const toInt = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
+const toTs = (v) => {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return new Date(Math.round((v - 25569) * 86400000)).toISOString(); // Excel serial
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s;
+  const d = new Date(s); return isNaN(d) ? null : d.toISOString();
+};
+
+// Upsert the whole list in chunks (one statement per chunk so 400+ rows fit
+// inside the function timeout). Keeps status/notes/unlock state for phones
+// that already exist. With replace=true, phones missing from the file are removed.
+async function uploadHot(contacts, replace) {
+  const q = db();
+  const result = { new: 0, upd: 0, removed: 0, skipped: 0, total: contacts.length };
+  const seen = new Set(); const clean = [];
+  for (const c of contacts) {
+    const phone = String(c.phone || '').replace(/[^0-9]/g, '');
+    if (!phone || seen.has(phone)) { result.skipped++; continue; }
+    seen.add(phone);
+    clean.push({ phone, name: c.name || null, city: c.city || null, region: c.region || null, tag_bucket: c.tag_bucket || null, score: toInt(c.score), why: c.why || null, lifecycle: c.lifecycle || null, intent_score: toInt(c.intent_score), inbound_msgs: toInt(c.inbound_msgs), photos: toInt(c.photos), last_inbound: toTs(c.last_inbound), last_ask: c.last_ask || null, sort_order: clean.length + 1 });
+  }
+  const CHUNK = 150;
+  for (let s = 0; s < clean.length; s += CHUNK) {
+    const part = clean.slice(s, s + CHUNK);
+    const col = (k) => part.map(r => r[k]);
+    const r = await q(`INSERT INTO hot_contacts (phone,name,city,region,tag_bucket,score,why,lifecycle,intent_score,inbound_msgs,photos,last_inbound,last_ask,sort_order)
+      SELECT * FROM UNNEST($1::text[],$2::text[],$3::text[],$4::text[],$5::text[],$6::int[],$7::text[],$8::text[],$9::int[],$10::int[],$11::int[],$12::timestamp[],$13::text[],$14::int[])
+      ON CONFLICT (phone) DO UPDATE SET name=EXCLUDED.name, city=EXCLUDED.city, region=EXCLUDED.region, tag_bucket=EXCLUDED.tag_bucket, score=EXCLUDED.score, why=EXCLUDED.why, lifecycle=EXCLUDED.lifecycle, intent_score=EXCLUDED.intent_score, inbound_msgs=EXCLUDED.inbound_msgs, photos=EXCLUDED.photos, last_inbound=EXCLUDED.last_inbound, last_ask=EXCLUDED.last_ask, sort_order=EXCLUDED.sort_order, date_updated=NOW()
+      RETURNING (xmax = 0) AS inserted`,
+      [col('phone'), col('name'), col('city'), col('region'), col('tag_bucket'), col('score'), col('why'), col('lifecycle'), col('intent_score'), col('inbound_msgs'), col('photos'), col('last_inbound'), col('last_ask'), col('sort_order')]);
+    for (const row of r) { if (row.inserted) result.new++; else result.upd++; }
+  }
+  if (replace && clean.length) {
+    const del = await q(`DELETE FROM hot_contacts WHERE NOT (phone = ANY($1::text[])) RETURNING id`, [clean.map(r => r.phone)]);
+    result.removed = del.length;
+  }
+  return result;
+}
+
+async function updateHotContact(id, updates) {
+  const q = db();
+  const { status, notes, whatsapp_sent } = updates;
+  const row = await q(`SELECT id, unlocked_date, (unlocked_date = ${MX_TODAY}) AS is_today FROM hot_contacts WHERE id = $1`, [id]);
+  if (!row.length) return { error: 'not found', code: 404 };
+  if (!row[0].unlocked_date) return { error: 'locked', code: 403 };
+  if (whatsapp_sent && !row[0].is_today) return { error: 'daily_limit', code: 403 };
+  let sets = ['date_updated = NOW()'], p = [], i = 1;
+  if (status) { sets.push(`status = $${i++}`); p.push(status); }
+  if (notes !== undefined) { sets.push(`notes = $${i++}`); p.push(notes); }
+  if (whatsapp_sent !== undefined) { sets.push(`whatsapp_sent = $${i++}`); p.push(whatsapp_sent); if (whatsapp_sent) sets.push('whatsapp_sent_date = NOW()'); }
+  p.push(id);
+  await q(`UPDATE hot_contacts SET ${sets.join(', ')} WHERE id = $${i}`, p);
+  return { success: true };
+}
+
 const HEADERS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Content-Type': 'application/json' };
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: HEADERS });
 
@@ -321,6 +417,23 @@ export default async (req) => {
       if (!a) return json({ error: 'agent required' }, 400);
       const count = await db()(`DELETE FROM ${tbl(a)} RETURNING id`);
       return json({ cleared: count.length });
+    }
+
+    // Nancy Hot & Payment list
+    if (method === 'GET' && path === '/hot/contacts') return json(await getHotContacts(qs));
+    if (method === 'POST' && path === '/hot/upload') {
+      const body = await readBody();
+      return json(await uploadHot(body.contacts || [], body.replace !== false));
+    }
+    if (method === 'POST' && path === '/hot/clear') {
+      const r = await db()(`DELETE FROM hot_contacts RETURNING id`);
+      return json({ cleared: r.length });
+    }
+    if (method === 'PUT' && path.startsWith('/hot/contact/')) {
+      const id = parseInt(path.split('/').pop());
+      const body = await readBody();
+      const r = await updateHotContact(id, body);
+      return r.error ? json({ error: r.error }, r.code) : json(r);
     }
 
     const agent = validAgent(qs.agent);
