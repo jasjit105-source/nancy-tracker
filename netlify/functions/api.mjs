@@ -30,11 +30,33 @@ async function initDB() {
     }
     try { await q(`ALTER TABLE ${htbl(a)} ADD COLUMN IF NOT EXISTS whatsapp_sent_date TIMESTAMP`); } catch(e) {}
   }
+  // Records which agent a contact was handed off from (e.g. 'jazmin')
+  try { await q(`ALTER TABLE nancy_contacts ADD COLUMN IF NOT EXISTS handoff_from VARCHAR(20)`); } catch(e) {}
   return { success: true };
 }
 
 const hoursSinceExpr = `COALESCE(EXTRACT(EPOCH FROM (NOW() - last_contact_date))/3600, hours_since, 0)`;
 const cols = `id, phone, name, buy_score, win_status, agent, city, lifecycle, reasons, ROUND(${hoursSinceExpr})::int as hours_since, crm_score, priority, status, notes, whatsapp_sent, COALESCE(whatsapp_sent_date, NULL)::timestamp as whatsapp_sent_date, date_added, date_updated, is_new, batch_date, buy_pct, reason_to_buy`;
+
+// HANDOFF: physically move Jazmin's non-customer contacts that have gone
+// 85+ hours without contact into Nancy's table. Status, notes and WhatsApp
+// history travel with the contact. Runs after every upload and before every
+// contacts/stats read so the move happens even without a new upload.
+async function handoffToNancy() {
+  const q = db();
+  const moved = await q(`WITH moved AS (
+      DELETE FROM jazmin_contacts
+      WHERE (${hoursSinceExpr}) >= 85
+        AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer')
+      RETURNING *
+    )
+    INSERT INTO nancy_contacts (phone,name,buy_score,win_status,agent,city,lifecycle,reasons,hours_since,crm_score,priority,status,notes,whatsapp_sent,whatsapp_sent_date,last_contact_date,date_added,date_updated,is_new,batch_date,buy_pct,reason_to_buy,handoff_from)
+    SELECT phone,name,buy_score,win_status,agent,city,lifecycle,reasons,hours_since,crm_score,priority,status,notes,whatsapp_sent,whatsapp_sent_date,last_contact_date,date_added,NOW(),TRUE,CURRENT_DATE,buy_pct,reason_to_buy,'jazmin'
+    FROM moved
+    ON CONFLICT (phone) DO NOTHING
+    RETURNING phone`);
+  return moved.length;
+}
 
 async function getJazminContacts(filters) {
   const q = db();
@@ -50,7 +72,7 @@ async function getJazminContacts(filters) {
 async function getNancyContacts(filters) {
   const q = db();
   const { status, search } = filters || {};
-  let sql1 = `SELECT ${cols}, 'nancy' as source FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
+  let sql1 = `SELECT ${cols}, CASE WHEN handoff_from = 'jazmin' THEN 'jazmin_handoff' ELSE 'nancy' END as source FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
   let sql2 = `SELECT ${cols}, 'jazmin_handoff' as source FROM jazmin_contacts WHERE (${hoursSinceExpr}) >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
   let sql = `SELECT * FROM ((${sql1}) UNION ALL (${sql2})) combined WHERE 1=1`;
   const p = []; let i = 1;
@@ -173,30 +195,31 @@ async function uploadSingle(contacts) {
     const reasonToBuy = calcReason(c);
     const lastContactDate = hours ? `NOW() - INTERVAL '${parseInt(hours)} hours'` : 'NULL';
 
-    // Check if phone exists in ANY agent table (prevent cross-table dupes)
+    // If the phone already exists in ANY agent table, refresh it in place there.
+    // The owning table never changes on upload; only handoffToNancy() moves contacts.
     let exists = false;
     for (const a of AGENTS) {
       const found = await q(`SELECT id FROM ${tbl(a)} WHERE phone = $1`, [phone]);
       if (found.length > 0) {
-        // Update in place if it's the same target, skip if different
-        if (a === targetAgent) {
-          await q(`UPDATE ${tbl(a)} SET name=$1,buy_score=$2,win_status=$3,agent=$4,city=$5,lifecycle=$6,reasons=$7,hours_since=$8,crm_score=$9,priority=$10,last_contact_date=${lastContactDate},buy_pct=$11,reason_to_buy=$12,date_updated=NOW(),batch_date=CURRENT_DATE WHERE phone=$13`,
-            [c.name||null,c.buy_score||null,c.window||null,c.agent||null,c.city||null,c.lifecycle||null,c.reasons||null,hours||null,score||null,c.priority||null,buyPct,reasonToBuy,phone]);
-          result[targetAgent].upd++;
-        } else {
-          result.dupes++;
-        }
+        await q(`UPDATE ${tbl(a)} SET name=$1,buy_score=$2,win_status=$3,agent=$4,city=$5,lifecycle=$6,reasons=$7,hours_since=$8,crm_score=$9,priority=$10,last_contact_date=${lastContactDate},buy_pct=$11,reason_to_buy=$12,date_updated=NOW(),batch_date=CURRENT_DATE WHERE phone=$13`,
+          [c.name||null,c.buy_score||null,c.window||null,c.agent||null,c.city||null,c.lifecycle||null,c.reasons||null,hours||null,score||null,c.priority||null,buyPct,reasonToBuy,phone]);
+        result[a].upd++;
+        if (a !== targetAgent) result.dupes++;
         exists = true;
         break;
       }
     }
 
     if (!exists) {
-      await q(`INSERT INTO ${t} (phone,name,buy_score,win_status,agent,city,lifecycle,reasons,hours_since,crm_score,priority,last_contact_date,buy_pct,reason_to_buy,status,is_new,batch_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,${lastContactDate},$12,$13,'Pendiente',TRUE,CURRENT_DATE)`,
+      // A Jazmin/Adriana row routed to Nancy at upload time is a handoff too; tag it so the UI shows the pill
+      const handoffCol = (targetAgent === 'nancy' && (agentRaw.includes('jazmin') || agentRaw.includes('adriana'))) ? `,'jazmin'` : '';
+      await q(`INSERT INTO ${t} (phone,name,buy_score,win_status,agent,city,lifecycle,reasons,hours_since,crm_score,priority,last_contact_date,buy_pct,reason_to_buy,status,is_new,batch_date${handoffCol ? ',handoff_from' : ''}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,${lastContactDate},$12,$13,'Pendiente',TRUE,CURRENT_DATE${handoffCol})`,
         [phone,c.name||null,c.buy_score||null,c.window||null,c.agent||null,c.city||null,c.lifecycle||null,c.reasons||null,hours||null,score||null,c.priority||null,buyPct,reasonToBuy]);
       result[targetAgent].new++;
     }
   }
+  // Move Jazmin's stale (85h+, non-customer) contacts to Nancy
+  result.handoff = await handoffToNancy();
   return result;
 }
 
@@ -303,6 +326,7 @@ export default async (req) => {
     const agent = validAgent(qs.agent);
     if (method === 'GET' && path === '/contacts') {
       if (!agent) return json({ error: 'agent required' }, 400);
+      if (agent !== 'yoana') await handoffToNancy();
       return json(await getContacts(agent, qs));
     }
     if (method === 'GET' && path === '/historial') {
@@ -318,6 +342,7 @@ export default async (req) => {
     }
     if (method === 'GET' && path === '/stats') {
       if (!agent) return json({ error: 'agent required' }, 400);
+      if (agent !== 'yoana') await handoffToNancy();
       return json(await getStats(agent));
     }
     return json({ error: 'Not found' }, 404);
