@@ -1,7 +1,8 @@
 const { neon } = require("@neondatabase/serverless");
 
 function db() {
-  const u = process.env.DATABASE_URL;
+  let u = process.env.DATABASE_URL || process.env.NETLIFY_DB_URL || process.env.NETLIFY_DATABASE_URL;
+  if (!u) { try { u = require("@netlify/database").getConnectionString(); } catch (e) {} }
   if (!u) throw new Error("DATABASE_URL not set");
   return neon(u);
 }
