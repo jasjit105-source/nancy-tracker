@@ -1,11 +1,15 @@
-const { neon } = require("@neondatabase/serverless");
+import { neon } from "@neondatabase/serverless";
+import { getConnectionString } from "@netlify/database";
 
+// Netlify Functions v2 (ESM) so the Netlify Database connection (NETLIFY_DB_URL)
+// is available at runtime. DATABASE_URL still wins if set explicitly.
 function db() {
-  let u = process.env.DATABASE_URL || process.env.NETLIFY_DB_URL || process.env.NETLIFY_DATABASE_URL;
-  if (!u) { try { u = require("@netlify/database").getConnectionString(); } catch (e) {} }
+  let u = process.env.DATABASE_URL || process.env.NETLIFY_DB_URL;
+  if (!u) { try { u = getConnectionString(); } catch (e) {} }
   if (!u) throw new Error("DATABASE_URL not set");
   return neon(u);
 }
+
 
 const AGENTS = ['nancy','jazmin','yoana'];
 function tbl(a) { return a + '_contacts'; }
@@ -260,60 +264,67 @@ async function getStats(agent) {
   return { total: totalCount, newToday: newCount, byStatus, byAgent, historialCount: histCount[0].count };
 }
 
-exports.handler = async (event) => {
-  const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Content-Type': 'application/json' };
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
-  const authHeader = event.headers.authorization || event.headers.Authorization || '';
+const HEADERS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Content-Type': 'application/json' };
+const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: HEADERS });
+
+export default async (req) => {
+  if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: HEADERS });
+  const authHeader = req.headers.get('authorization') || '';
   if (authHeader.replace('Bearer ', '') !== (process.env.APP_TOKEN || 'sahiba2026')) {
-    return { statusCode: 401, headers, body: JSON.stringify({ error: 'No autorizado' }) };
+    return json({ error: 'No autorizado' }, 401);
   }
   try {
-    const path = event.path.replace('/.netlify/functions/api', '').replace('/api', '') || '/';
-    const method = event.httpMethod;
-    const qs = event.queryStringParameters || {};
-    if (method === 'POST' && path === '/init') return { statusCode: 200, headers, body: JSON.stringify(await initDB()) };
-    
+    const url = new URL(req.url);
+    const path = url.pathname.replace('/.netlify/functions/api', '').replace('/api', '') || '/';
+    const method = req.method;
+    const qs = Object.fromEntries(url.searchParams);
+    const readBody = async () => { try { return await req.json(); } catch (e) { return {}; } };
+
+    if (method === 'POST' && path === '/init') return json(await initDB());
+
     if (method === 'POST' && path === '/upload-single') {
-      const body = JSON.parse(event.body);
-      return { statusCode: 200, headers, body: JSON.stringify(await uploadSingle(body.contacts || [])) };
+      const body = await readBody();
+      return json(await uploadSingle(body.contacts || []));
     }
     if (method === 'POST' && path === '/upload') {
-      const body = JSON.parse(event.body);
+      const body = await readBody();
       const a = validAgent(body.agent);
-      if (!a) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
-      return { statusCode: 200, headers, body: JSON.stringify(await uploadContacts(a, body.contacts || [])) };
+      if (!a) return json({ error: 'agent required' }, 400);
+      return json(await uploadContacts(a, body.contacts || []));
     }
     if (method === 'POST' && path === '/clear') {
-      const body = JSON.parse(event.body);
+      const body = await readBody();
       const a = validAgent(body.agent);
-      if (!a) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
+      if (!a) return json({ error: 'agent required' }, 400);
       const count = await db()(`DELETE FROM ${tbl(a)} RETURNING id`);
-      return { statusCode: 200, headers, body: JSON.stringify({ cleared: count.length }) };
+      return json({ cleared: count.length });
     }
 
     const agent = validAgent(qs.agent);
     if (method === 'GET' && path === '/contacts') {
-      if (!agent) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
-      return { statusCode: 200, headers, body: JSON.stringify(await getContacts(agent, qs)) };
+      if (!agent) return json({ error: 'agent required' }, 400);
+      return json(await getContacts(agent, qs));
     }
     if (method === 'GET' && path === '/historial') {
-      if (!agent) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
-      return { statusCode: 200, headers, body: JSON.stringify(await getHistorial(agent, qs)) };
+      if (!agent) return json({ error: 'agent required' }, 400);
+      return json(await getHistorial(agent, qs));
     }
     if (method === 'PUT' && path.startsWith('/contact/')) {
       const id = parseInt(path.split('/').pop());
-      const body = JSON.parse(event.body);
+      const body = await readBody();
       const a = validAgent(body.agent || qs.agent);
-      if (!a) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
-      return { statusCode: 200, headers, body: JSON.stringify(await updateContact(a, id, body)) };
+      if (!a) return json({ error: 'agent required' }, 400);
+      return json(await updateContact(a, id, body));
     }
     if (method === 'GET' && path === '/stats') {
-      if (!agent) return { statusCode: 400, headers, body: JSON.stringify({ error: 'agent required' }) };
-      return { statusCode: 200, headers, body: JSON.stringify(await getStats(agent)) };
+      if (!agent) return json({ error: 'agent required' }, 400);
+      return json(await getStats(agent));
     }
-    return { statusCode: 404, headers, body: JSON.stringify({ error: 'Not found' }) };
+    return json({ error: 'Not found' }, 404);
   } catch (err) {
     console.error('Error:', err);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message, type: err.constructor.name }) };
+    return json({ error: err.message, type: err.constructor.name }, 500);
   }
 };
+
+export const config = { path: ['/.netlify/functions/api', '/.netlify/functions/api/*'] };
