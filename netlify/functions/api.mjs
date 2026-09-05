@@ -37,6 +37,8 @@ async function initDB() {
   await q(`CREATE TABLE IF NOT EXISTS hot_contacts (id SERIAL PRIMARY KEY, phone VARCHAR(20) UNIQUE NOT NULL, name VARCHAR(200), city VARCHAR(200), region VARCHAR(100), tag_bucket TEXT, score INTEGER, why TEXT, lifecycle VARCHAR(100), intent_score INTEGER, inbound_msgs INTEGER, photos INTEGER, last_inbound TIMESTAMP, last_ask TEXT, status VARCHAR(50) DEFAULT 'Pendiente', notes TEXT DEFAULT '', whatsapp_sent BOOLEAN DEFAULT FALSE, whatsapp_sent_date TIMESTAMP, unlocked_date DATE, sort_order INTEGER, date_added TIMESTAMP DEFAULT NOW(), date_updated TIMESTAMP DEFAULT NOW())`);
   // Shared settings: WhatsApp message templates, catalog metadata
   await q(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT NOW())`);
+  // Catalog library: PDFs live in Netlify Blobs (key 'cat-<id>'), names/links here
+  await q(`CREATE TABLE IF NOT EXISTS catalogs (id SERIAL PRIMARY KEY, slug TEXT UNIQUE NOT NULL, name TEXT NOT NULL, file_name TEXT, size INTEGER, uploaded_at TIMESTAMP DEFAULT NOW(), sort_order INTEGER DEFAULT 0)`);
   return { success: true };
 }
 
@@ -400,23 +402,63 @@ async function putSettings(obj) {
   return getSettings();
 }
 const catalogStore = () => getStore({ name: 'catalog', consistency: 'strong' });
-async function saveCatalog(req) {
-  const name = decodeURIComponent(req.headers.get('x-file-name') || 'catalogo.pdf');
+const slugify = (s) => (String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)) || 'catalogo';
+const CAT_COLS = `id, slug, name, file_name, size, uploaded_at, sort_order`;
+async function listCatalogs() { return db()(`SELECT ${CAT_COLS} FROM catalogs ORDER BY sort_order ASC, id ASC`); }
+
+// Upload a PDF. With ?id=<n> it replaces the file of an existing catalog,
+// otherwise it creates a new catalog named by the X-Catalog-Name header.
+async function saveCatalog(req, qs) {
+  const q = db();
+  const fileName = decodeURIComponent(req.headers.get('x-file-name') || 'catalogo.pdf');
   const buf = await req.arrayBuffer();
   if (!buf.byteLength) return { error: 'empty file', code: 400 };
   const head = new TextDecoder().decode(new Uint8Array(buf.slice(0, 5)));
   if (!head.startsWith('%PDF')) return { error: 'File is not a PDF', code: 400 };
-  const uploaded = new Date().toISOString();
-  await catalogStore().set('current', buf, { metadata: { name, size: buf.byteLength, uploaded } });
-  await putSettings({ catalog_name: name, catalog_size: String(buf.byteLength), catalog_updated: uploaded });
-  return { success: true, name, size: buf.byteLength };
+  let row;
+  if (qs && qs.id) {
+    const found = await q(`SELECT ${CAT_COLS} FROM catalogs WHERE id = $1`, [parseInt(qs.id, 10)]);
+    if (!found.length) return { error: 'catalog not found', code: 404 };
+    row = found[0];
+  } else {
+    const name = (decodeURIComponent(req.headers.get('x-catalog-name') || '').trim()) || fileName.replace(/\.pdf$/i, '');
+    const base = slugify(name); let slug = base;
+    for (let n = 2; (await q(`SELECT 1 FROM catalogs WHERE slug = $1`, [slug])).length; n++) slug = `${base}-${n}`;
+    const ord = await q(`SELECT COALESCE(MAX(sort_order), 0) + 1 AS o FROM catalogs`);
+    row = (await q(`INSERT INTO catalogs (slug, name, sort_order) VALUES ($1, $2, $3) RETURNING ${CAT_COLS}`, [slug, name, ord[0].o]))[0];
+  }
+  await catalogStore().set('cat-' + row.id, buf, { metadata: { name: row.name, fileName, size: buf.byteLength } });
+  const upd = await q(`UPDATE catalogs SET file_name = $1, size = $2, uploaded_at = NOW() WHERE id = $3 RETURNING ${CAT_COLS}`, [fileName, buf.byteLength, row.id]);
+  return { success: true, catalog: upd[0] };
 }
-// Public: customers open this link from the WhatsApp message
-async function serveCatalog() {
-  const r = await catalogStore().getWithMetadata('current', { type: 'arrayBuffer' });
+async function updateCatalog(id, body) {
+  const q = db();
+  const sets = [], p = []; let i = 1;
+  if (body.name != null && String(body.name).trim()) { sets.push(`name = $${i++}`); p.push(String(body.name).trim()); }
+  if (body.sort_order != null) { sets.push(`sort_order = $${i++}`); p.push(parseInt(body.sort_order, 10) || 0); }
+  if (!sets.length) return { error: 'nothing to update', code: 400 };
+  p.push(id);
+  const r = await q(`UPDATE catalogs SET ${sets.join(', ')} WHERE id = $${i} RETURNING ${CAT_COLS}`, p);
+  return r.length ? { success: true, catalog: r[0] } : { error: 'catalog not found', code: 404 };
+}
+async function deleteCatalog(id) {
+  const r = await db()(`DELETE FROM catalogs WHERE id = $1 RETURNING id`, [id]);
+  if (!r.length) return { error: 'catalog not found', code: 404 };
+  try { await catalogStore().delete('cat-' + id); } catch (e) {}
+  return { success: true };
+}
+// Public: customers open /catalogo/<slug> from the WhatsApp message.
+// /catalogo with no slug serves the first catalog.
+async function serveCatalog(slug) {
+  const q = db();
+  const rows = slug
+    ? await q(`SELECT ${CAT_COLS} FROM catalogs WHERE slug = $1`, [slug])
+    : await q(`SELECT ${CAT_COLS} FROM catalogs WHERE file_name IS NOT NULL ORDER BY sort_order ASC, id ASC LIMIT 1`);
+  if (!rows.length || !rows[0].file_name) return new Response('No hay catálogo disponible', { status: 404 });
+  const r = await catalogStore().get('cat-' + rows[0].id, { type: 'arrayBuffer' });
   if (!r) return new Response('No hay catálogo disponible', { status: 404 });
-  const name = String((r.metadata && r.metadata.name) || 'catalogo.pdf').replace(/[^\w.\-]/g, '_');
-  return new Response(r.data, { status: 200, headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${name}"`, 'Cache-Control': 'no-cache' } });
+  const fname = String(rows[0].file_name || 'catalogo.pdf').replace(/[^\w.\-]/g, '_');
+  return new Response(r, { status: 200, headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${fname}"`, 'Cache-Control': 'no-cache' } });
 }
 
 const HEADERS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Content-Type': 'application/json' };
@@ -428,8 +470,9 @@ export default async (req) => {
   const path = url.pathname.replace('/.netlify/functions/api', '').replace('/api', '') || '/';
   const method = req.method;
   // Public catalog link (no token): /catalogo
-  if (method === 'GET' && (url.pathname === '/catalogo' || path === '/catalog')) {
-    try { return await serveCatalog(); } catch (err) { console.error('catalog', err); return new Response('Error', { status: 500 }); }
+  const catMatch = url.pathname.match(/^\/catalogo(?:\/([a-z0-9-]+))?\/?$/);
+  if (method === 'GET' && catMatch) {
+    try { return await serveCatalog(catMatch[1] || null); } catch (err) { console.error('catalog', err); return new Response('Error', { status: 500 }); }
   }
   const authHeader = req.headers.get('authorization') || '';
   if (authHeader.replace('Bearer ', '') !== (process.env.APP_TOKEN || 'sahiba2026')) {
@@ -462,14 +505,18 @@ export default async (req) => {
     // Shared settings + catalog upload
     if (method === 'GET' && path === '/settings') return json(await getSettings());
     if (method === 'PUT' && path === '/settings') return json(await putSettings(await readBody()));
+    if (method === 'GET' && path === '/catalogs') return json(await listCatalogs());
     if (method === 'POST' && path === '/catalog') {
-      const r = await saveCatalog(req);
+      const r = await saveCatalog(req, qs);
       return r.error ? json({ error: r.error }, r.code) : json(r);
     }
-    if (method === 'DELETE' && path === '/catalog') {
-      await catalogStore().delete('current');
-      await putSettings({ catalog_name: '', catalog_size: '', catalog_updated: '' });
-      return json({ success: true });
+    if (method === 'PUT' && path.startsWith('/catalogs/')) {
+      const r = await updateCatalog(parseInt(path.split('/').pop(), 10), await readBody());
+      return r.error ? json({ error: r.error }, r.code) : json(r);
+    }
+    if (method === 'DELETE' && path.startsWith('/catalogs/')) {
+      const r = await deleteCatalog(parseInt(path.split('/').pop(), 10));
+      return r.error ? json({ error: r.error }, r.code) : json(r);
     }
 
     // Nancy Hot & Payment list
@@ -518,4 +565,4 @@ export default async (req) => {
   }
 };
 
-export const config = { path: ['/.netlify/functions/api', '/.netlify/functions/api/*', '/catalogo'] };
+export const config = { path: ['/.netlify/functions/api', '/.netlify/functions/api/*', '/catalogo', '/catalogo/*'] };
