@@ -118,7 +118,7 @@ function t(k){return T[LANG][k]||T.es[k]||k}
 function applyLang(){document.getElementById('langBtn').textContent=LANG==='es'?'EN':'ES';document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(T[LANG][k])el.textContent=T[LANG][k]});document.querySelectorAll('[data-ph]').forEach(function(el){var k=el.dataset.ph;if(T[LANG][k])el.placeholder=T[LANG][k]})}
 function toggleLang(){LANG=LANG==='es'?'en':'es';localStorage.setItem('sahiba_lang',LANG);applyLang();loadContacts()}
 // Dark (default) / light theme, remembered per browser
-function applyTheme(th){document.documentElement.setAttribute('data-theme',th);var b=document.getElementById('themeBtn');if(b){b.textContent=th==='dark'?'☀':'☾';b.title=th==='dark'?'Switch to light':'Switch to dark'}}
+function applyTheme(th){document.documentElement.setAttribute('data-theme',th);var b=document.getElementById('themeBtn');if(b){b.textContent=th==='dark'?'☀ LIGHT':'☾ DARK';b.title=th==='dark'?'Switch the whole CRM to light mode':'Switch the whole CRM to dark mode'}}
 function toggleTheme(){var th=(localStorage.getItem('sahiba_theme')||'dark')==='dark'?'light':'dark';localStorage.setItem('sahiba_theme',th);applyTheme(th)}
 applyTheme(localStorage.getItem('sahiba_theme')||'dark');
 const API_BASE=window.location.origin,AUTH_TOKEN='sahiba2026';
