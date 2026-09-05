@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { getConnectionString } from "@netlify/database";
+import { getStore } from "@netlify/blobs";
 
 // Netlify Functions v2 (ESM) so the Netlify Database connection (NETLIFY_DB_URL)
 // is available at runtime. DATABASE_URL still wins if set explicitly.
@@ -34,6 +35,8 @@ async function initDB() {
   try { await q(`ALTER TABLE nancy_contacts ADD COLUMN IF NOT EXISTS handoff_from VARCHAR(20)`); } catch(e) {}
   // Nancy Hot & Payment list (separate from the daily call lists)
   await q(`CREATE TABLE IF NOT EXISTS hot_contacts (id SERIAL PRIMARY KEY, phone VARCHAR(20) UNIQUE NOT NULL, name VARCHAR(200), city VARCHAR(200), region VARCHAR(100), tag_bucket TEXT, score INTEGER, why TEXT, lifecycle VARCHAR(100), intent_score INTEGER, inbound_msgs INTEGER, photos INTEGER, last_inbound TIMESTAMP, last_ask TEXT, status VARCHAR(50) DEFAULT 'Pendiente', notes TEXT DEFAULT '', whatsapp_sent BOOLEAN DEFAULT FALSE, whatsapp_sent_date TIMESTAMP, unlocked_date DATE, sort_order INTEGER, date_added TIMESTAMP DEFAULT NOW(), date_updated TIMESTAMP DEFAULT NOW())`);
+  // Shared settings: WhatsApp message templates, catalog metadata
+  await q(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT NOW())`);
   return { success: true };
 }
 
@@ -383,19 +386,56 @@ async function updateHotContact(id, updates) {
   return { success: true };
 }
 
+// ===== SETTINGS (shared WhatsApp templates) + CATALOG PDF (Netlify Blobs) =====
+async function getSettings() {
+  const rows = await db()(`SELECT key, value FROM settings`);
+  const o = {}; for (const r of rows) o[r.key] = r.value; return o;
+}
+async function putSettings(obj) {
+  const q = db();
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (!/^[a-z0-9_]{1,50}$/.test(k)) continue;
+    await q(`INSERT INTO settings (key, value, updated_at) VALUES ($1,$2,NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`, [k, v == null ? null : String(v)]);
+  }
+  return getSettings();
+}
+const catalogStore = () => getStore({ name: 'catalog', consistency: 'strong' });
+async function saveCatalog(req) {
+  const name = decodeURIComponent(req.headers.get('x-file-name') || 'catalogo.pdf');
+  const buf = await req.arrayBuffer();
+  if (!buf.byteLength) return { error: 'empty file', code: 400 };
+  const head = new TextDecoder().decode(new Uint8Array(buf.slice(0, 5)));
+  if (!head.startsWith('%PDF')) return { error: 'File is not a PDF', code: 400 };
+  const uploaded = new Date().toISOString();
+  await catalogStore().set('current', buf, { metadata: { name, size: buf.byteLength, uploaded } });
+  await putSettings({ catalog_name: name, catalog_size: String(buf.byteLength), catalog_updated: uploaded });
+  return { success: true, name, size: buf.byteLength };
+}
+// Public: customers open this link from the WhatsApp message
+async function serveCatalog() {
+  const r = await catalogStore().getWithMetadata('current', { type: 'arrayBuffer' });
+  if (!r) return new Response('No hay catálogo disponible', { status: 404 });
+  const name = String((r.metadata && r.metadata.name) || 'catalogo.pdf').replace(/[^\w.\-]/g, '_');
+  return new Response(r.data, { status: 200, headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${name}"`, 'Cache-Control': 'no-cache' } });
+}
+
 const HEADERS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Content-Type': 'application/json' };
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: HEADERS });
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: HEADERS });
+  const url = new URL(req.url);
+  const path = url.pathname.replace('/.netlify/functions/api', '').replace('/api', '') || '/';
+  const method = req.method;
+  // Public catalog link (no token): /catalogo
+  if (method === 'GET' && (url.pathname === '/catalogo' || path === '/catalog')) {
+    try { return await serveCatalog(); } catch (err) { console.error('catalog', err); return new Response('Error', { status: 500 }); }
+  }
   const authHeader = req.headers.get('authorization') || '';
   if (authHeader.replace('Bearer ', '') !== (process.env.APP_TOKEN || 'sahiba2026')) {
     return json({ error: 'No autorizado' }, 401);
   }
   try {
-    const url = new URL(req.url);
-    const path = url.pathname.replace('/.netlify/functions/api', '').replace('/api', '') || '/';
-    const method = req.method;
     const qs = Object.fromEntries(url.searchParams);
     const readBody = async () => { try { return await req.json(); } catch (e) { return {}; } };
 
@@ -417,6 +457,19 @@ export default async (req) => {
       if (!a) return json({ error: 'agent required' }, 400);
       const count = await db()(`DELETE FROM ${tbl(a)} RETURNING id`);
       return json({ cleared: count.length });
+    }
+
+    // Shared settings + catalog upload
+    if (method === 'GET' && path === '/settings') return json(await getSettings());
+    if (method === 'PUT' && path === '/settings') return json(await putSettings(await readBody()));
+    if (method === 'POST' && path === '/catalog') {
+      const r = await saveCatalog(req);
+      return r.error ? json({ error: r.error }, r.code) : json(r);
+    }
+    if (method === 'DELETE' && path === '/catalog') {
+      await catalogStore().delete('current');
+      await putSettings({ catalog_name: '', catalog_size: '', catalog_updated: '' });
+      return json({ success: true });
     }
 
     // Nancy Hot & Payment list
@@ -465,4 +518,4 @@ export default async (req) => {
   }
 };
 
-export const config = { path: ['/.netlify/functions/api', '/.netlify/functions/api/*'] };
+export const config = { path: ['/.netlify/functions/api', '/.netlify/functions/api/*', '/catalogo'] };

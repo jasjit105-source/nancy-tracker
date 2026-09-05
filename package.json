@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "dependencies": {
     "@neondatabase/serverless": "^0.10.0",
+    "@netlify/blobs": "^11.0.3",
     "@netlify/database": "^2.0.1"
   }
 }
