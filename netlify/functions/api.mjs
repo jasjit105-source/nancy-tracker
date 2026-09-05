@@ -12,6 +12,8 @@ function db() {
 }
 
 
+// Minimum crm_score to keep a non-customer contact. 0 = keep everyone (score scales vary by export).
+const MIN_SCORE = parseInt(process.env.MIN_SCORE || '0', 10);
 const AGENTS = ['nancy','jazmin','yoana'];
 function tbl(a) { return a + '_contacts'; }
 function otbls(a) { return AGENTS.filter(x=>x!==a).map(x=>x+'_contacts'); }
@@ -68,7 +70,7 @@ async function handoffToNancy() {
 async function getJazminContacts(filters) {
   const q = db();
   const { status, search } = filters || {};
-  let sql = `SELECT ${cols}, 'jazmin' as source FROM jazmin_contacts WHERE (crm_score IS NULL OR crm_score >= 400) AND ((${hoursSinceExpr}) < 85 OR (lifecycle IS NOT NULL AND LOWER(lifecycle) = 'customer'))`;
+  let sql = `SELECT ${cols}, 'jazmin' as source FROM jazmin_contacts WHERE (crm_score IS NULL OR crm_score >= ${MIN_SCORE}) AND ((${hoursSinceExpr}) < 85 OR (lifecycle IS NOT NULL AND LOWER(lifecycle) = 'customer'))`;
   const p = []; let i = 1;
   if (status && status !== 'all') { sql += ` AND status = $${i++}`; p.push(status); }
   if (search) { sql += ` AND (name ILIKE $${i} OR phone ILIKE $${i})`; p.push('%'+search+'%'); i++; }
@@ -79,8 +81,8 @@ async function getJazminContacts(filters) {
 async function getNancyContacts(filters) {
   const q = db();
   const { status, search } = filters || {};
-  let sql1 = `SELECT ${cols}, CASE WHEN handoff_from = 'jazmin' THEN 'jazmin_handoff' ELSE 'nancy' END as source FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
-  let sql2 = `SELECT ${cols}, 'jazmin_handoff' as source FROM jazmin_contacts WHERE (${hoursSinceExpr}) >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
+  let sql1 = `SELECT ${cols}, CASE WHEN handoff_from = 'jazmin' THEN 'jazmin_handoff' ELSE 'nancy' END as source FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= ${MIN_SCORE})`;
+  let sql2 = `SELECT ${cols}, 'jazmin_handoff' as source FROM jazmin_contacts WHERE (${hoursSinceExpr}) >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= ${MIN_SCORE}) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
   let sql = `SELECT * FROM ((${sql1}) UNION ALL (${sql2})) combined WHERE 1=1`;
   const p = []; let i = 1;
   if (status && status !== 'all') { sql += ` AND status = $${i++}`; p.push(status); }
@@ -92,7 +94,7 @@ async function getNancyContacts(filters) {
 async function getYoanaContacts(filters) {
   const q = db();
   const { status, search } = filters || {};
-  let sql = `SELECT ${cols}, 'yoana' as source FROM yoana_contacts WHERE (crm_score IS NULL OR crm_score >= 400)`;
+  let sql = `SELECT ${cols}, 'yoana' as source FROM yoana_contacts WHERE (crm_score IS NULL OR crm_score >= ${MIN_SCORE})`;
   const p = []; let i = 1;
   if (status && status !== 'all') { sql += ` AND status = $${i++}`; p.push(status); }
   if (search) { sql += ` AND (name ILIKE $${i} OR phone ILIKE $${i})`; p.push('%'+search+'%'); i++; }
@@ -118,9 +120,10 @@ async function getHistorial(agent, filters) {
 }
 
 // Calculate buy percentage and reason
-function calcBuyPct(buyScore) {
-  if (!buyScore) return 0;
-  return Math.round((buyScore / 165) * 100);
+function calcBuyPct(buyScore, maxScore) {
+  const b = Number(buyScore) || 0, m = Number(maxScore) || 165;
+  if (!b) return 0;
+  return Math.min(100, Math.round((b / m) * 100));
 }
 
 function calcReason(c) {
@@ -157,8 +160,6 @@ async function uploadSingle(contacts) {
         [c.phone,c.name,c.agent,c.city,c.lifecycle,c.crm_score,c.status,c.notes,c.whatsapp_sent,c.whatsapp_sent_date,c.date_added]);
       result.archived++;
     }
-    // Clean low score non-customers
-    await q(`DELETE FROM ${t} WHERE crm_score IS NOT NULL AND crm_score < 400 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer')`);
     // Mark not new
     await q(`UPDATE ${t} SET is_new = FALSE WHERE is_new = TRUE`);
   }
@@ -166,6 +167,7 @@ async function uploadSingle(contacts) {
   // Track all phones we've processed to prevent dupes within this upload
   const processed = new Set();
 
+  const maxBuy = Math.max(1, ...contacts.map(c => Number(c.buy_score) || 0));
   for (const c of contacts) {
     const phone = String(c.phone||'').replace(/[^0-9]/g,'');
     if (!phone) continue;
@@ -179,7 +181,7 @@ async function uploadSingle(contacts) {
     const agentRaw = String(c.agent||'').toLowerCase().trim();
 
     // Skip non-customer low scores
-    if (!isCustomer && score < 400) { result.skipped++; continue; }
+    if (!isCustomer && score < MIN_SCORE) { result.skipped++; continue; }
 
     // Determine target agent
     let targetAgent;
@@ -198,7 +200,7 @@ async function uploadSingle(contacts) {
     }
 
     const t = tbl(targetAgent);
-    const buyPct = calcBuyPct(c.buy_score);
+    const buyPct = calcBuyPct(c.buy_score, maxBuy);
     const reasonToBuy = calcReason(c);
     const lastContactDate = hours ? `NOW() - INTERVAL '${parseInt(hours)} hours'` : 'NULL';
 
@@ -262,7 +264,7 @@ async function updateContact(agent, id, updates) {
 async function getStats(agent) {
   const q = db();
   if (agent === 'jazmin') {
-    const f = `(crm_score IS NULL OR crm_score >= 400) AND ((${hoursSinceExpr}) < 85 OR (lifecycle IS NOT NULL AND LOWER(lifecycle) = 'customer'))`;
+    const f = `(crm_score IS NULL OR crm_score >= ${MIN_SCORE}) AND ((${hoursSinceExpr}) < 85 OR (lifecycle IS NOT NULL AND LOWER(lifecycle) = 'customer'))`;
     const total = await q(`SELECT COUNT(*) as count FROM jazmin_contacts WHERE ${f}`);
     const byStatus = await q(`SELECT status, COUNT(*) as count FROM jazmin_contacts WHERE ${f} GROUP BY status ORDER BY count DESC`);
     const newToday = await q(`SELECT COUNT(*) as count FROM jazmin_contacts WHERE is_new = TRUE AND ${f}`);
@@ -271,7 +273,7 @@ async function getStats(agent) {
     return { total: total[0].count, newToday: newToday[0].count, byStatus, byAgent, historialCount: histCount[0].count };
   }
   if (agent === 'yoana') {
-    const f = `(crm_score IS NULL OR crm_score >= 400)`;
+    const f = `(crm_score IS NULL OR crm_score >= ${MIN_SCORE})`;
     const total = await q(`SELECT COUNT(*) as count FROM yoana_contacts WHERE ${f}`);
     const byStatus = await q(`SELECT status, COUNT(*) as count FROM yoana_contacts WHERE ${f} GROUP BY status ORDER BY count DESC`);
     const newToday = await q(`SELECT COUNT(*) as count FROM yoana_contacts WHERE is_new = TRUE AND ${f}`);
@@ -280,8 +282,8 @@ async function getStats(agent) {
     return { total: total[0].count, newToday: newToday[0].count, byStatus, byAgent, historialCount: histCount[0].count };
   }
   // Nancy: her table + jazmin handoffs
-  const nf = `(lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400)`;
-  const jf = `(${hoursSinceExpr}) >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= 400) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
+  const nf = `(lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= ${MIN_SCORE})`;
+  const jf = `(${hoursSinceExpr}) >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= ${MIN_SCORE}) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
   const t1 = await q(`SELECT COUNT(*) as count FROM nancy_contacts WHERE ${nf}`);
   const t2 = await q(`SELECT COUNT(*) as count FROM jazmin_contacts WHERE ${jf}`);
   const totalCount = parseInt(t1[0].count) + parseInt(t2[0].count);
