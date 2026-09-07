@@ -70,7 +70,7 @@ async function handoffToNancy() {
 async function getJazminContacts(filters) {
   const q = db();
   const { status, search } = filters || {};
-  let sql = `SELECT ${cols}, 'jazmin' as source FROM jazmin_contacts WHERE (crm_score IS NULL OR crm_score >= ${MIN_SCORE}) AND ((${hoursSinceExpr}) < 85 OR (lifecycle IS NOT NULL AND LOWER(lifecycle) = 'customer'))`;
+  let sql = `SELECT ${cols}, 'jazmin' as source FROM jazmin_contacts WHERE COALESCE(whatsapp_sent, FALSE) = FALSE AND (crm_score IS NULL OR crm_score >= ${MIN_SCORE}) AND ((${hoursSinceExpr}) < 85 OR (lifecycle IS NOT NULL AND LOWER(lifecycle) = 'customer'))`;
   const p = []; let i = 1;
   if (status && status !== 'all') { sql += ` AND status = $${i++}`; p.push(status); }
   if (search) { sql += ` AND (name ILIKE $${i} OR phone ILIKE $${i})`; p.push('%'+search+'%'); i++; }
@@ -81,8 +81,8 @@ async function getJazminContacts(filters) {
 async function getNancyContacts(filters) {
   const q = db();
   const { status, search } = filters || {};
-  let sql1 = `SELECT ${cols}, CASE WHEN handoff_from = 'jazmin' THEN 'jazmin_handoff' ELSE 'nancy' END as source FROM nancy_contacts WHERE (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= ${MIN_SCORE})`;
-  let sql2 = `SELECT ${cols}, 'jazmin_handoff' as source FROM jazmin_contacts WHERE (${hoursSinceExpr}) >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= ${MIN_SCORE}) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
+  let sql1 = `SELECT ${cols}, CASE WHEN handoff_from = 'jazmin' THEN 'jazmin_handoff' ELSE 'nancy' END as source FROM nancy_contacts WHERE COALESCE(whatsapp_sent, FALSE) = FALSE AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= ${MIN_SCORE})`;
+  let sql2 = `SELECT ${cols}, 'jazmin_handoff' as source FROM jazmin_contacts WHERE COALESCE(whatsapp_sent, FALSE) = FALSE AND (${hoursSinceExpr}) >= 85 AND (lifecycle IS NULL OR LOWER(lifecycle) != 'customer') AND (crm_score IS NULL OR crm_score >= ${MIN_SCORE}) AND phone NOT IN (SELECT phone FROM nancy_contacts)`;
   let sql = `SELECT * FROM ((${sql1}) UNION ALL (${sql2})) combined WHERE 1=1`;
   const p = []; let i = 1;
   if (status && status !== 'all') { sql += ` AND status = $${i++}`; p.push(status); }
@@ -94,7 +94,7 @@ async function getNancyContacts(filters) {
 async function getYoanaContacts(filters) {
   const q = db();
   const { status, search } = filters || {};
-  let sql = `SELECT ${cols}, 'yoana' as source FROM yoana_contacts WHERE (crm_score IS NULL OR crm_score >= ${MIN_SCORE})`;
+  let sql = `SELECT ${cols}, 'yoana' as source FROM yoana_contacts WHERE COALESCE(whatsapp_sent, FALSE) = FALSE AND (crm_score IS NULL OR crm_score >= ${MIN_SCORE})`;
   const p = []; let i = 1;
   if (status && status !== 'all') { sql += ` AND status = $${i++}`; p.push(status); }
   if (search) { sql += ` AND (name ILIKE $${i} OR phone ILIKE $${i})`; p.push('%'+search+'%'); i++; }
@@ -150,19 +150,8 @@ async function uploadSingle(contacts) {
   const q = db();
   const result = { nancy: {new:0,upd:0}, jazmin: {new:0,upd:0}, yoana: {new:0,upd:0}, archived:0, skipped:0, dupes:0, total: contacts.length };
 
-  // Archive contacts with notes from all tables
-  for (const a of AGENTS) {
-    const t = tbl(a);
-    const ht = htbl(a);
-    const withNotes = await q(`SELECT * FROM ${t} WHERE notes IS NOT NULL AND notes != ''`);
-    for (const c of withNotes) {
-      await q(`INSERT INTO ${ht} (phone,name,agent,city,lifecycle,crm_score,status,notes,whatsapp_sent,whatsapp_sent_date,date_added) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [c.phone,c.name,c.agent,c.city,c.lifecycle,c.crm_score,c.status,c.notes,c.whatsapp_sent,c.whatsapp_sent_date,c.date_added]);
-      result.archived++;
-    }
-    // Mark not new
-    await q(`UPDATE ${t} SET is_new = FALSE WHERE is_new = TRUE`);
-  }
+  // Reset the 'new' flag from the previous batch (contacts are never deleted or archived on upload)
+  for (const a of AGENTS) await q(`UPDATE ${tbl(a)} SET is_new = FALSE WHERE is_new = TRUE`);
 
   // Track all phones we've processed to prevent dupes within this upload
   const processed = new Set();
@@ -255,7 +244,7 @@ async function updateContact(agent, id, updates) {
   let sets = ['date_updated = NOW()'], p = [], i = 1;
   if (status) { sets.push(`status = $${i++}`); p.push(status); }
   if (notes !== undefined) { sets.push(`notes = $${i++}`); p.push(notes); }
-  if (whatsapp_sent !== undefined) { sets.push(`whatsapp_sent = $${i++}`); p.push(whatsapp_sent); if (whatsapp_sent) sets.push('whatsapp_sent_date = NOW()'); }
+  if (whatsapp_sent !== undefined) { sets.push(`whatsapp_sent = $${i++}`); p.push(whatsapp_sent); if (whatsapp_sent) { sets.push('whatsapp_sent_date = NOW()'); if (!status) sets.push(`status = CASE WHEN status = 'Pendiente' THEN 'Contactada' ELSE status END`); } }
   p.push(id);
   await q(`UPDATE ${t} SET ${sets.join(', ')} WHERE id = $${i}`, p);
   return { success: true };
@@ -322,6 +311,7 @@ async function getHotContacts(qs) {
   const p = []; let i = 1; let where = 'WHERE 1=1';
   if (status && status !== 'all') { where += ` AND status = $${i++}`; p.push(status); }
   if (search) { where += ` AND (name ILIKE $${i} OR phone ILIKE $${i} OR city ILIKE $${i})`; p.push('%' + search + '%'); i++; }
+  where += ' AND COALESCE(whatsapp_sent, FALSE) = FALSE'; // sent contacts live in History
   if (mode !== 'all') where += ' AND unlocked_date IS NOT NULL';
   const rows = await q(`SELECT ${hotCols} FROM hot_contacts ${where} ORDER BY unlocked_date DESC NULLS LAST, score DESC NULLS LAST, sort_order ASC NULLS LAST, id ASC`, p);
   const counts = await q(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE unlocked_date IS NULL)::int AS locked, COUNT(*) FILTER (WHERE unlocked_date = ${MX_TODAY})::int AS today, COUNT(*) FILTER (WHERE whatsapp_sent_date IS NOT NULL AND ${MX_DATE('whatsapp_sent_date')} = ${MX_TODAY})::int AS sent_today, COUNT(*) FILTER (WHERE status = 'Venta')::int AS sales FROM hot_contacts`);
@@ -377,17 +367,38 @@ async function uploadHot(contacts, replace) {
 async function updateHotContact(id, updates) {
   const q = db();
   const { status, notes, whatsapp_sent } = updates;
-  const row = await q(`SELECT id, unlocked_date, (unlocked_date = ${MX_TODAY}) AS is_today FROM hot_contacts WHERE id = $1`, [id]);
+  const row = await q(`SELECT id, unlocked_date, whatsapp_sent, (unlocked_date = ${MX_TODAY}) AS is_today FROM hot_contacts WHERE id = $1`, [id]);
   if (!row.length) return { error: 'not found', code: 404 };
   if (!row[0].unlocked_date) return { error: 'locked', code: 403 };
-  if (whatsapp_sent && !row[0].is_today) return { error: 'daily_limit', code: 403 };
+  // First send only on today's chats; re-sending to an already-contacted client (follow-up from History) is always allowed
+  if (whatsapp_sent && !row[0].is_today && !row[0].whatsapp_sent) return { error: 'daily_limit', code: 403 };
   let sets = ['date_updated = NOW()'], p = [], i = 1;
   if (status) { sets.push(`status = $${i++}`); p.push(status); }
   if (notes !== undefined) { sets.push(`notes = $${i++}`); p.push(notes); }
-  if (whatsapp_sent !== undefined) { sets.push(`whatsapp_sent = $${i++}`); p.push(whatsapp_sent); if (whatsapp_sent) sets.push('whatsapp_sent_date = NOW()'); }
+  if (whatsapp_sent !== undefined) { sets.push(`whatsapp_sent = $${i++}`); p.push(whatsapp_sent); if (whatsapp_sent) { sets.push('whatsapp_sent_date = NOW()'); if (!status) sets.push(`status = CASE WHEN status = 'Pendiente' THEN 'Contactada' ELSE status END`); } }
   p.push(id);
   await q(`UPDATE hot_contacts SET ${sets.join(', ')} WHERE id = $${i}`, p);
   return { success: true };
+}
+
+// ===== HISTORY: every contact that has been messaged, from both lists =====
+// Rows stay in their own table (status/notes remain editable); this is a view.
+async function getHistory(qs) {
+  const q = db();
+  const { status, search, list } = qs || {};
+  const p = []; let i = 1; let where = '';
+  if (status && status !== 'all') { where += ` AND status = $${i++}`; p.push(status); }
+  if (search) { where += ` AND (name ILIKE $${i} OR phone ILIKE $${i} OR city ILIKE $${i})`; p.push('%' + search + '%'); i++; }
+  const parts = [];
+  for (const a of AGENTS) {
+    parts.push(`SELECT id, '${a}' AS agent, 'contacts' AS list, phone, name, city, lifecycle, status, notes, whatsapp_sent_date, date_updated, buy_pct AS score FROM ${tbl(a)} WHERE whatsapp_sent = TRUE${where}`);
+  }
+  parts.push(`SELECT id, 'nancy' AS agent, 'hot' AS list, phone, name, city, lifecycle, status, notes, whatsapp_sent_date, date_updated, score FROM hot_contacts WHERE whatsapp_sent = TRUE${where}`);
+  let sql = `SELECT * FROM (${parts.map(x => '(' + x + ')').join(' UNION ALL ')}) h`;
+  if (list === 'contacts' || list === 'hot') sql += ` WHERE list = '${list}'`;
+  sql += ` ORDER BY whatsapp_sent_date DESC NULLS LAST, date_updated DESC`;
+  // the same $n params are reused by every UNION branch
+  return await q(sql, p);
 }
 
 // ===== SETTINGS (shared WhatsApp templates) + CATALOG PDF (Netlify Blobs) =====
@@ -503,6 +514,9 @@ export default async (req) => {
       const count = await db()(`DELETE FROM ${tbl(a)} RETURNING id`);
       return json({ cleared: count.length });
     }
+
+    // History: contacted clients from both lists
+    if (method === 'GET' && path === '/history') return json(await getHistory(qs));
 
     // Shared settings + catalog upload
     if (method === 'GET' && path === '/settings') return json(await getSettings());
