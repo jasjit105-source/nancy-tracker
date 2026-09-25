@@ -60,7 +60,8 @@ const wantStats = has('--stats') || (!wantJson && !wantPost);
 
 if (wantStats) {
   console.log(`Filas: ${rows.length}  (CSV ${stats.total}, omitidas ${stats.skipped})`);
-  console.log(`Perla (llamadas): ${stats.perla}  · Intento de compra ${stats.byLife['intento de compra'] || 0} · Hot Lead ${stats.byLife['hot lead'] || 0}`);
+  console.log(`Perla: ${stats.perla}  · Intento de compra ${stats.byLife['intento de compra'] || 0} + Hot Lead alternos`);
+  console.log(`Jazmin: ${stats.jazmin}  · Hot Lead alternos`);
   console.log(`Yoana (WhatsApp): ${stats.yoana}  · Visita a la tienda ${stats.byLife['visita a la tienda'] || 0} · Cold Lead ${stats.byLife['cold lead'] || 0}`);
 }
 

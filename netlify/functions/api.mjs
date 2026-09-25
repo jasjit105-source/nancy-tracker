@@ -2,7 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { getConnectionString } from "@netlify/database";
 import { getStore } from "@netlify/blobs";
 import { timingSafeEqual } from "crypto";
-import { applyOutcome, normalizeLead, parseCsv } from "./followup-lib.mjs";
+import { applyOutcome, followupActor, identifyFollowupPin, normalizeLead, parseCsv, projectFollowup, STAFF } from "./followup-lib.mjs";
 
 // Netlify Functions v2 (ESM) so the Netlify Database connection (NETLIFY_DB_URL)
 // is available at runtime. DATABASE_URL still wins if set explicitly.
@@ -477,7 +477,8 @@ async function serveCatalog(slug) {
   return new Response(r, { status: 200, headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${fname}"`, 'Cache-Control': 'no-cache' } });
 }
 
-// ===== SEGUIMIENTO: daily warm-lead list for Perla (calls) and Yoana (WhatsApp) =====
+// ===== SEGUIMIENTO: Perla, Jazmin (calls) and Yoana (WhatsApp) =====
+// Each person authenticates with her own PIN. APP_TOKEN does not open these routes.
 // Lead fields are refreshed on import. Outcome, attempts, and history are not.
 const FOLLOWUP_STATUSES_REACHED = ['Vendido', 'Viene a la tienda', 'Volver a llamar', 'No le interesa'];
 
@@ -515,6 +516,7 @@ function ensureFollowupSchema() {
         auto BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT NOW()
       )`);
+      await q(`ALTER TABLE followup_outcomes ADD COLUMN IF NOT EXISTS person TEXT`);
       await q(`CREATE INDEX IF NOT EXISTS followups_assignee_active_idx ON followups (assignee, active)`);
       await q(`CREATE INDEX IF NOT EXISTS followup_outcomes_contact_idx ON followup_outcomes (contact_id)`);
       await q(`CREATE INDEX IF NOT EXISTS followup_outcomes_created_idx ON followup_outcomes (created_at)`);
@@ -562,18 +564,37 @@ const followupSelect = `contact_id, name, phone, lifecycle, assignee, note, sugg
     THEN ROUND((EXTRACT(EPOCH FROM (NOW() - last_interaction)) / 86400.0)::numeric, 1)
     ELSE days_since END AS days_since_now`;
 
-async function listFollowups(qs) {
+function parseHistory(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') { try { return JSON.parse(raw); } catch (e) { return []; } }
+  return [];
+}
+
+async function listFollowups(qs, actor) {
   await ensureFollowupSchema();
   const q = db();
-  const assignee = String((qs && qs.assignee) || 'all').toLowerCase();
+  const staff = actor.role === 'staff';
+  const requested = String((qs && qs.assignee) || '').toLowerCase();
+  if (staff && requested && requested !== actor.person) return { error: 'No autorizado', code: 403 };
+  const assignee = staff ? actor.person : (requested || 'all');
+  if (!staff && assignee !== 'all' && !STAFF.includes(assignee)) return { rows: [], count: 0 };
   const scope = qs && qs.scope === 'all' ? 'all' : 'active';
   const life = qs && qs.lifecycle ? String(qs.lifecycle) : '';
   const search = qs && qs.search ? String(qs.search).trim() : '';
-  if (assignee !== 'all' && assignee !== 'perla' && assignee !== 'yoana') return { rows: [], count: 0 };
-  let sql = `SELECT ${followupSelect} FROM followups WHERE 1=1`;
   const p = [];
   let i = 1;
-  if (assignee === 'perla' || assignee === 'yoana') { sql += ` AND assignee = $${i++}`; p.push(assignee); }
+  const personSql = staff ? ` AND o.person = $${i++}` : '';
+  if (staff) p.push(actor.person);
+  let sql = `SELECT ${followupSelect},
+    COALESCE((
+      SELECT json_agg(json_build_object(
+        'status', o.status, 'comment', o.comment, 'auto', o.auto, 'created_at', o.created_at, 'person', o.person
+      ) ORDER BY o.created_at, o.id)
+      FROM followup_outcomes o
+      WHERE o.contact_id = followups.contact_id${personSql}
+    ), '[]'::json) AS history
+    FROM followups WHERE 1=1`;
+  if (assignee !== 'all') { sql += ` AND assignee = $${i++}`; p.push(assignee); }
   if (scope !== 'all') sql += ` AND active = TRUE`;
   if (life) { sql += ` AND lifecycle = $${i++}`; p.push(life); }
   if (search) {
@@ -583,7 +604,10 @@ async function listFollowups(qs) {
   }
   sql += ` ORDER BY sort_order ASC NULLS LAST, id ASC`;
   const rows = await q(sql, p);
-  return { rows: rows.map(shapeFollowup), count: rows.length };
+  return {
+    rows: rows.map((r) => projectFollowup({ ...shapeFollowup(r), history: parseHistory(r.history) }, actor)),
+    count: rows.length,
+  };
 }
 
 async function followupSummary() {
@@ -598,10 +622,14 @@ async function followupSummary() {
       COUNT(DISTINCT f.contact_id) FILTER (WHERE o.status = 'Viene a la tienda' AND ${MX_DATE('o.created_at')} = ${MX_TODAY})::int AS coming_to_store
     FROM followups f
     LEFT JOIN followup_outcomes o ON o.contact_id = f.contact_id
-    WHERE f.assignee IN ('perla','yoana')
+    WHERE f.assignee IN ('perla','yoana','jazmin')
     GROUP BY f.assignee`);
   const blank = () => ({ assigned: 0, contacted: 0, reached: 0, sold: 0, coming_to_store: 0 });
-  const people = { perla: { ...blank(), channel: 'llamadas' }, yoana: { ...blank(), channel: 'whatsapp' } };
+  const people = {
+    perla: { ...blank(), channel: 'llamadas' },
+    jazmin: { ...blank(), channel: 'llamadas' },
+    yoana: { ...blank(), channel: 'whatsapp' },
+  };
   for (const r of grouped) {
     if (!people[r.assignee]) continue;
     people[r.assignee].assigned = Number(r.assigned) || 0;
@@ -614,16 +642,30 @@ async function followupSummary() {
     timezone: 'America/Mexico_City',
     date: todayRows[0] ? asDay(todayRows[0].today) : null,
     perla: people.perla,
+    jazmin: people.jazmin,
     yoana: people.yoana,
     reached_statuses: FOLLOWUP_STATUSES_REACHED,
   };
 }
 
-async function recordFollowupOutcome(contactId, body) {
+async function historyFor(contactId, actor) {
+  const q = db();
+  const staff = actor.role === 'staff';
+  const rows = await q(
+    `SELECT status, comment, auto, created_at, person FROM followup_outcomes
+     WHERE contact_id = $1${staff ? ' AND person = $2' : ''}
+     ORDER BY created_at, id`,
+    staff ? [contactId, actor.person] : [contactId]
+  );
+  return rows;
+}
+
+async function recordFollowupOutcome(contactId, body, actor) {
   await ensureFollowupSchema();
   const q = db();
-  const found = await q(`SELECT contact_id, attempts, active FROM followups WHERE contact_id = $1`, [contactId]);
+  const found = await q(`SELECT contact_id, attempts, active, assignee FROM followups WHERE contact_id = $1`, [contactId]);
   if (!found.length) return { error: 'No encontramos ese contacto', code: 404 };
+  if (actor.role === 'staff' && found[0].assignee !== actor.person) return { error: 'No autorizado', code: 403 };
   const decision = applyOutcome({
     active: found[0].active === true || found[0].active === 't' || found[0].active === 'true',
     attempts: Number(found[0].attempts) || 0,
@@ -636,20 +678,40 @@ async function recordFollowupOutcome(contactId, body) {
     [decision.attempts, decision.outcome, decision.outcome_comment, decision.active, contactId, Number(found[0].attempts) || 0]
   );
   if (!updated.length) return { error: 'Este contacto ya cambió. Actualiza la lista.', code: 409 };
+  const person = actor.role === 'admin' ? 'admin' : actor.person;
   for (const ev of decision.events) {
-    await q(`INSERT INTO followup_outcomes (contact_id, status, comment, auto) VALUES ($1,$2,$3,$4)`, [contactId, ev.status, ev.comment, !!ev.auto]);
+    await q(`INSERT INTO followup_outcomes (contact_id, status, comment, auto, person) VALUES ($1,$2,$3,$4,$5)`, [contactId, ev.status, ev.comment, !!ev.auto, person]);
   }
   const u = updated[0];
+  const history = await historyFor(contactId, actor);
+  const projected = projectFollowup({
+    outcome_comment: u.outcome_comment,
+    history,
+  }, actor);
   return {
     success: true,
     dropped: decision.dropped,
     cold: !!decision.cold,
     attempts: Number(u.attempts) || 0,
     outcome: u.outcome,
-    outcome_comment: u.outcome_comment,
+    outcome_comment: projected.outcome_comment,
     outcome_at: u.outcome_at,
     active: u.active === true || u.active === 't' || u.active === 'true',
+    history: projected.history,
   };
+}
+
+async function reassignFollowup(contactId, body, actor) {
+  if (!actor || actor.role !== 'admin') return { error: 'No autorizado', code: 403 };
+  await ensureFollowupSchema();
+  const assignee = String((body && body.assignee) || '').trim().toLowerCase();
+  if (!STAFF.includes(assignee)) return { error: 'Asignación no válida', code: 400 };
+  const r = await db()(
+    `UPDATE followups SET assignee = $1, date_updated = NOW() WHERE contact_id = $2 RETURNING contact_id, assignee`,
+    [assignee, contactId]
+  );
+  if (!r.length) return { error: 'No encontramos ese contacto', code: 404 };
+  return { success: true, contact_id: r[0].contact_id, assignee: r[0].assignee };
 }
 
 async function importFollowups(items) {
@@ -715,7 +777,7 @@ async function exportFollowups() {
     FROM followups f
     LEFT JOIN (
       SELECT contact_id, json_agg(json_build_object(
-        'status', status, 'comment', comment, 'auto', auto, 'created_at', created_at
+        'status', status, 'comment', comment, 'auto', auto, 'created_at', created_at, 'person', person
       ) ORDER BY created_at, id) AS outcomes
       FROM followup_outcomes
       GROUP BY contact_id
@@ -730,6 +792,11 @@ async function exportFollowups() {
       return { ...shapeFollowup(r), date_added: r.date_added, date_updated: r.date_updated, outcomes: outcomes || [] };
     }),
   };
+}
+
+function bearerToken(req) {
+  const header = req.headers.get('authorization') || '';
+  return /^bearer\s+/i.test(header) ? header.replace(/^bearer\s+/i, '').trim() : '';
 }
 
 function importAuthorized(req) {
@@ -773,6 +840,7 @@ export default async (req) => {
     try { return await serveCatalog(catMatch[1] || null); } catch (err) { console.error('catalog', err); return new Response('Error', { status: 500 }); }
   }
   // Import/export use FOLLOWUP_IMPORT_TOKEN, not the app token baked into the page.
+  // Staff and admin lists use each person's PIN. APP_TOKEN is rejected on both.
   if (path === '/followups/import' || path === '/followups/export') {
     if (!importAuthorized(req)) return json({ error: 'No autorizado' }, 401);
     try {
@@ -788,6 +856,43 @@ export default async (req) => {
       return json({ error: err.message }, 500);
     }
   }
+  const fuPinRoute = path === '/followups/login' || path === '/followups/summary' || path === '/followups' || /^\/followups\/[0-9]+\/(outcome|reassign)$/.test(path);
+  if (fuPinRoute) {
+    try {
+      const readBody = async () => { try { return await req.json(); } catch (e) { return {}; } };
+      if (method === 'POST' && path === '/followups/login') {
+        const body = await readBody();
+        const actor = followupActor(identifyFollowupPin(body && body.pin));
+        if (!actor) return json({ error: 'PIN incorrecto' }, 401);
+        return json({ ok: true, role: actor.role, person: actor.person });
+      }
+      const actor = followupActor(identifyFollowupPin(bearerToken(req)));
+      if (!actor) return json({ error: 'No autorizado' }, 401);
+      const qs = Object.fromEntries(url.searchParams);
+      if (method === 'GET' && path === '/followups/summary') {
+        if (actor.role !== 'admin') return json({ error: 'No autorizado' }, 403);
+        return json(await followupSummary());
+      }
+      if (method === 'GET' && path === '/followups') {
+        const r = await listFollowups(qs, actor);
+        return r.error ? json({ error: r.error }, r.code || 400) : json(r);
+      }
+      const fuOutcome = path.match(/^\/followups\/([0-9]+)\/outcome$/);
+      if (method === 'POST' && fuOutcome) {
+        const r = await recordFollowupOutcome(fuOutcome[1], await readBody(), actor);
+        return r.error ? json({ error: r.error }, r.code || 400) : json(r);
+      }
+      const fuMove = path.match(/^\/followups\/([0-9]+)\/reassign$/);
+      if (method === 'POST' && fuMove) {
+        const r = await reassignFollowup(fuMove[1], await readBody(), actor);
+        return r.error ? json({ error: r.error }, r.code || 400) : json(r);
+      }
+      return json({ error: 'Not found' }, 404);
+    } catch (err) {
+      console.error('followup', err);
+      return json({ error: err.message }, 500);
+    }
+  }
   const authHeader = req.headers.get('authorization') || '';
   if (authHeader.replace('Bearer ', '') !== (process.env.APP_TOKEN || 'sahiba2026')) {
     return json({ error: 'No autorizado' }, 401);
@@ -797,14 +902,6 @@ export default async (req) => {
     const readBody = async () => { try { return await req.json(); } catch (e) { return {}; } };
 
     if (method === 'POST' && path === '/init') return json(await initDB());
-
-    if (method === 'GET' && path === '/followups/summary') return json(await followupSummary());
-    if (method === 'GET' && path === '/followups') return json(await listFollowups(qs));
-    const fuOutcome = path.match(/^\/followups\/([0-9]+)\/outcome$/);
-    if (method === 'POST' && fuOutcome) {
-      const r = await recordFollowupOutcome(fuOutcome[1], await readBody());
-      return r.error ? json({ error: r.error }, r.code || 400) : json(r);
-    }
 
     if (method === 'POST' && path === '/upload-single') {
       const body = await readBody();

@@ -1,11 +1,21 @@
 // Pure helpers for the Seguimiento list. No database imports, so the seed
 // script and tests can reuse the same assignment, messages, and outcome rules.
 
+import { timingSafeEqual } from 'crypto';
+
 export const FINAL_STATUSES = ['Vendido', 'Viene a la tienda', 'No le interesa', 'Número equivocado'];
 export const RETRY_STATUSES = ['No contestó', 'Volver a llamar'];
 export const COLD_STATUS = 'Frío';
 export const MAX_ATTEMPTS = 2;
 export const REACHED_STATUSES = ['Vendido', 'Viene a la tienda', 'Volver a llamar', 'No le interesa'];
+export const STAFF = ['perla', 'yoana', 'jazmin'];
+
+const PIN_ENV = {
+  admin: 'FOLLOWUP_PIN_ADMIN',
+  perla: 'FOLLOWUP_PIN_PERLA',
+  yoana: 'FOLLOWUP_PIN_YOANA',
+  jazmin: 'FOLLOWUP_PIN_JAZMIN',
+};
 
 // Columns an import is allowed to refresh. Outcome history is intentionally absent.
 export const LEAD_FIELDS = [
@@ -24,11 +34,21 @@ export function normLife(lifecycle) {
   return String(lifecycle || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-export function assigneeForLifecycle(lifecycle) {
+// hotIndex counts Hot Lead rows in file order. Even → Perla, odd → Jazmin.
+export function assigneeForLifecycle(lifecycle, hotIndex = 0) {
   const k = normLife(lifecycle);
-  if (k === 'intento de compra' || k === 'hot lead') return 'perla';
+  if (k === 'intento de compra') return 'perla';
+  if (k === 'hot lead') return (Number(hotIndex) % 2 === 0) ? 'perla' : 'jazmin';
   if (k === 'visita a la tienda' || k === 'cold lead') return 'yoana';
   return null;
+}
+
+function senderName(assignee, fallback) {
+  const a = String(assignee || '').toLowerCase();
+  if (a === 'jazmin') return 'Jazmin';
+  if (a === 'yoana') return 'Yoana';
+  if (a === 'perla') return 'Perla';
+  return fallback;
 }
 
 export function greetingName(name) {
@@ -52,13 +72,13 @@ function intro(name, who) {
   return n ? `Hola ${n}, soy ${who} de Sahiba.` : `Hola, soy ${who} de Sahiba.`;
 }
 
-export function suggestedMessage(lifecycle, name) {
+export function suggestedMessage(lifecycle, name, assignee) {
   const k = normLife(lifecycle);
   if (k === 'intento de compra') {
     return `${intro(name, 'Perla')} Vi que tu compra se quedó a un paso. Si hoy dejas el anticipo, te aparto las piezas y cerramos el pedido. ¿Lo hacemos ahora?`;
   }
   if (k === 'hot lead') {
-    return `${intro(name, 'Perla')} Esta semana tenemos una promo en la colección. Si te late, te reservo las piezas para que no se agoten. ¿Cuáles aparto?`;
+    return `${intro(name, senderName(assignee, 'Perla'))} Esta semana tenemos una promo en la colección. Si te late, te reservo las piezas para que no se agoten. ¿Cuáles aparto?`;
   }
   if (k === 'visita a la tienda') {
     return `${intro(name, 'Yoana')} Te invito a la tienda de Mixcalco esta semana. Pregunta por Milagros y te damos un regalo de bienvenida. ¿Qué día puedes venir?`;
@@ -138,7 +158,7 @@ export function normalizeLead(raw, index) {
   const contact_id = String(src.contact_id ?? src.id ?? '').trim().slice(0, 40);
   if (!contact_id) return { ok: false, reason: 'missing_id' };
   const assignee = String(src.assignee || '').trim().toLowerCase();
-  if (assignee !== 'perla' && assignee !== 'yoana') return { ok: false, reason: 'bad_assignee' };
+  if (!STAFF.includes(assignee)) return { ok: false, reason: 'bad_assignee' };
   const phoneDigits = String(src.phone ?? '').replace(/\D/g, '');
   const daysRaw = src.days_since;
   const days = daysRaw === '' || daysRaw == null ? null : Number(daysRaw);
@@ -146,7 +166,7 @@ export function normalizeLead(raw, index) {
   const sort = sortRaw === '' || sortRaw == null ? index + 1 : Number(sortRaw);
   const note = src.note == null ? buildNote(src.comentarios, src.lifecycle) : String(src.note);
   const message = src.suggested_message == null || src.suggested_message === ''
-    ? suggestedMessage(src.lifecycle, src.name)
+    ? suggestedMessage(src.lifecycle, src.name, assignee)
     : String(src.suggested_message);
   return {
     ok: true,
@@ -167,13 +187,15 @@ export function normalizeLead(raw, index) {
 }
 
 export function buildSeedRows(csvRows) {
-  const stats = { perla: 0, yoana: 0, skipped: 0, total: csvRows.length, byLife: {} };
+  const stats = { perla: 0, yoana: 0, jazmin: 0, skipped: 0, total: csvRows.length, byLife: {} };
   const rows = [];
+  let hotIndex = 0;
   csvRows.forEach((raw, idx) => {
     const life = String(raw.lifecycle || '').trim();
-    const assignee = assigneeForLifecycle(life);
-    if (!raw.contact_id || !assignee) { stats.skipped++; return; }
     const key = normLife(life);
+    const assignee = assigneeForLifecycle(life, key === 'hot lead' ? hotIndex : 0);
+    if (!raw.contact_id || !assignee) { stats.skipped++; return; }
+    if (key === 'hot lead') hotIndex++;
     stats.byLife[key] = (stats.byLife[key] || 0) + 1;
     stats[assignee]++;
     const shaped = normalizeLead({
@@ -183,7 +205,7 @@ export function buildSeedRows(csvRows) {
       lifecycle: life,
       assignee,
       note: buildNote(raw.comentarios, life),
-      suggested_message: suggestedMessage(life, raw.name),
+      suggested_message: suggestedMessage(life, raw.name, assignee),
       last_interaction: raw.last_interaction,
       days_since: raw.days_since,
       ciudad: raw.ciudad,
@@ -206,7 +228,8 @@ export function applyOutcome(row, statusIn, commentIn) {
   const allowed = FINAL_STATUSES.concat(RETRY_STATUSES);
   if (!allowed.includes(status)) return { error: 'Estado no válido', code: 400 };
   const comment = String(commentIn || '').trim().slice(0, 280);
-  const events = [{ status, comment: comment || null, auto: false }];
+  if (!comment) return { error: 'Escribe una nota de lo que pasó en la llamada o el WhatsApp', code: 400 };
+  const events = [{ status, comment, auto: false }];
   const prevAttempts = Number(row.attempts) || 0;
   if (RETRY_STATUSES.includes(status)) {
     const attempts = prevAttempts + 1;
@@ -241,4 +264,49 @@ export function applyOutcome(row, statusIn, commentIn) {
     dropped: true,
     cold: false,
   };
+}
+
+// Map a PIN to admin | perla | yoana | jazmin. Fail closed: missing env, wrong PIN,
+// or two people sharing a PIN all return null. Never falls back to APP_TOKEN.
+export function identifyFollowupPin(pin, env = process.env) {
+  const given = Buffer.from(String(pin ?? ''), 'utf8');
+  if (!given.length) return null;
+  let found = null;
+  for (const role of Object.keys(PIN_ENV)) {
+    const raw = env[PIN_ENV[role]];
+    if (raw == null || raw === '') continue;
+    const expected = Buffer.from(String(raw), 'utf8');
+    if (expected.length !== given.length) continue;
+    if (timingSafeEqual(given, expected)) {
+      if (found) return null;
+      found = role;
+    }
+  }
+  return found;
+}
+
+export function followupActor(role) {
+  if (role === 'admin') return { role: 'admin', person: null };
+  if (STAFF.includes(role)) return { role: 'staff', person: role };
+  return null;
+}
+
+export function visibleHistory(events, actor) {
+  const list = Array.isArray(events) ? events : [];
+  if (!actor || actor.role === 'admin') return list.slice();
+  return list.filter((e) => e && e.person === actor.person);
+}
+
+// Staff responses keep the customer note and this person's call notes only.
+export function projectFollowup(row, actor) {
+  const src = row || {};
+  const history = visibleHistory(src.history || src.outcomes || [], actor);
+  const out = { ...src, history };
+  delete out.outcomes;
+  if (actor && actor.role === 'staff') {
+    const mine = history.filter((e) => e && !e.auto && e.comment);
+    const last = mine.length ? mine[mine.length - 1] : null;
+    out.outcome_comment = last ? last.comment : null;
+  }
+  return out;
 }
