@@ -56,8 +56,66 @@ tbody tr.is-locked td{opacity:.45}tbody tr.section-row td{background:var(--bg-el
 .breakdown-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.breakdown-card{background:var(--bg-panel);border:1px solid var(--border);border-radius:12px;padding:20px 22px}.breakdown-card h3{font-family:'Fraunces',serif;font-weight:500;font-size:16px;margin-bottom:14px;letter-spacing:-.3px}.breakdown-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)}.breakdown-row:last-child{border-bottom:none}.breakdown-label{min-width:110px;font-size:12.5px;font-weight:500}.breakdown-bar-wrap{flex:1;height:4px;background:var(--bg-elevated);border-radius:2px;overflow:hidden}.breakdown-bar{height:100%;background:var(--accent);border-radius:2px;transition:width .5s cubic-bezier(.16,1,.3,1)}.breakdown-count{font-family:'JetBrains Mono',monospace;font-size:12px;min-width:30px;text-align:right;color:var(--text-muted)}
 .loading{text-align:center;padding:60px 20px;color:var(--text-muted);font-size:12.5px}.spinner{width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;margin:0 auto 12px;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:900px){.topbar{padding:0 12px;gap:12px;overflow-x:auto}.brand{padding-right:12px}.brand-tag{display:none}.nav-item{padding:5px 8px;font-size:11px}.main{padding:16px 12px 40px}.page-title h1{font-size:24px}.stats-grid{grid-template-columns:repeat(2,1fr)}.stat-tile .value{font-size:26px}.breakdown-grid{grid-template-columns:1fr}.toolbar{flex-direction:column;align-items:stretch}.agent-tabs{flex-wrap:wrap}th,td{padding:8px 10px;font-size:11px}}
+html.seg-only #contactsView{display:none!important}
+html.seg-only #seguimientoView{display:block}
+.fu-help{font-size:13px;color:var(--text-muted);margin:-8px 0 14px;max-width:62ch;line-height:1.45}
+.fu-sum{display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:16px}
+.fu-sum-card{background:var(--bg-panel);border:1px solid var(--border);border-radius:12px;padding:14px 14px 12px}
+.fu-sum-card h3{font-family:'Fraunces',serif;font-weight:500;font-size:18px;letter-spacing:-.3px}
+.fu-sum-card .who{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-muted);margin-top:2px}
+.fu-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.fu-metric .n{font-family:'Fraunces',serif;font-size:26px;letter-spacing:-.8px;line-height:1}
+.fu-metric .l{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-top:4px;line-height:1.3}
+.fu-metric.good .n{color:var(--green)}.fu-metric.warm .n{color:var(--amber)}.fu-metric.accent .n{color:var(--accent)}
+.fu-note-sum{margin-top:10px;font-size:11.5px;color:var(--text-muted)}
+.fu-list{display:flex;flex-direction:column;gap:12px}
+.fu-card{background:var(--bg-panel);border:1px solid var(--border);border-radius:14px;padding:14px 14px 12px;transition:opacity .2s}
+.fu-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.fu-name{font-family:'Fraunces',serif;font-weight:500;font-size:22px;letter-spacing:-.4px;line-height:1.15}
+.fu-phone{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text-muted);margin-top:4px}
+.fu-side{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:0 0 auto}
+.fu-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.fu-block{background:var(--bg-elevated);border-radius:10px;padding:10px 12px;margin-top:10px}
+.fu-kicker{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px}
+.fu-block p{font-size:14px;line-height:1.45;white-space:pre-wrap}
+.fu-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.fu-actions .btn,.fu-actions a.btn{flex:1 1 30%;min-width:96px;min-height:44px;justify-content:center;font-weight:600;text-decoration:none}
+a.fu-call{background:var(--accent);color:var(--bg-deep);border-color:var(--accent)}
+a.fu-call:hover{background:var(--accent-hover)}
+a.fu-wa{background:var(--green);color:#fff;border-color:var(--green)}
+a.fu-wa:hover{background:var(--green-hover)}
+.fu-actions .is-disabled{opacity:.4;pointer-events:none}
+.fu-comment{margin-top:10px;background:var(--bg-elevated);border:1px solid var(--border);padding:10px 12px;min-height:42px}
+.fu-try{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:var(--amber-dim);color:var(--amber);font-size:12px;font-weight:600}
+.fu-outcomes{display:grid;grid-template-columns:1fr;gap:8px;margin-top:10px}
+.fu-out{min-height:48px;border-radius:9px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;padding:10px 12px;text-align:left;line-height:1.25}
+.fu-out:hover{border-color:var(--border-strong)}
+.fu-out:disabled{opacity:.5;cursor:default}
+.fu-out.sold{background:var(--green-dim);color:var(--green);border-color:transparent}
+.fu-out.store{background:var(--teal-dim);color:var(--teal);border-color:transparent}
+.fu-out.later{background:var(--amber-dim);color:var(--amber);border-color:transparent}
+.fu-out.nope{background:var(--red-dim);color:var(--red);border-color:transparent}
+.fu-out.bad{color:var(--text-muted)}
+.fu-card.is-busy{opacity:.65}
+.fu-result{margin-top:10px;padding:8px 10px;border-radius:8px;background:var(--bg-elevated);font-size:12.5px}
+.fu-life-intento{background:var(--amber-dim);color:var(--amber);border-color:transparent}
+.fu-life-hot{background:var(--red-dim);color:var(--red);border-color:transparent}
+.fu-life-visita{background:var(--teal-dim);color:var(--teal);border-color:transparent}
+.fu-life-cold{background:var(--bg-elevated);color:var(--text-muted)}
+.fu-hist{font-size:13.5px;line-height:1.4;padding:8px 0;border-top:1px solid var(--border)}
+.fu-block .fu-hist:first-of-type{border-top:none;padding-top:0}
+.fu-comment.need{border-color:var(--red)}
+.fu-gate{background:var(--bg-panel);border:1px solid var(--border);border-radius:14px;padding:18px 16px;max-width:440px}
+.fu-gate h2{font-family:'Fraunces',serif;font-weight:500;font-size:26px;letter-spacing:-.4px;margin-bottom:6px}
+.fu-gate p{color:var(--text-muted);font-size:13.5px;line-height:1.45;margin-bottom:12px}
+.fu-pin{display:block;width:100%;background:var(--bg-elevated);border:1px solid var(--border);border-radius:9px;padding:12px;font-size:18px;letter-spacing:.18em;margin-bottom:10px;color:var(--text)}
+.fu-pin:focus{outline:none;border-color:var(--accent)}
+.fu-pin-err{color:var(--red);min-height:1.2em;margin:8px 0 0}
+.fu-tabs{margin:0 0 12px}
+@media(min-width:720px){.fu-metrics{grid-template-columns:repeat(5,1fr)}.fu-outcomes{grid-template-columns:1fr 1fr}}
+@media(min-width:980px){.fu-sum{grid-template-columns:repeat(3,minmax(0,1fr))}}
 </style>
-<script>try{document.documentElement.setAttribute('data-theme',localStorage.getItem('sahiba_theme')||'dark')}catch(e){}</script>
+<script>try{document.documentElement.setAttribute('data-theme',localStorage.getItem('sahiba_theme')||'dark');if(new URLSearchParams(location.search).get('v')==='perla')document.documentElement.classList.add('seg-only')}catch(e){}</script>
 </head>
 <body>
 <div class="app" id="app">
@@ -65,6 +123,7 @@ tbody tr.is-locked td{opacity:.45}tbody tr.section-row td{background:var(--bg-el
 <div class="brand"><div class="brand-mark">Sahiba<span class="dot"></span></div><div class="brand-tag">CRM</div></div>
 <div class="nav-section">
 <button class="nav-item active" data-view="contacts"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span data-t="contacts">Contacts</span></button>
+<button class="nav-item nav-seg" data-view="seguimiento"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.33 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg><span>Seguimiento</span></button>
 <button class="nav-item nav-hot" data-view="hot"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c4-2 7-5.5 7-10a7 7 0 0 0-3-5.7c0 3-2 4-2 4s1-4-3-7c0 3-4 5-4 9.5C7 17 9 20 12 22z"/></svg><span data-t="hot">Nancy Hot &amp; Payment</span></button>
 <button class="nav-item nav-admin" data-view="upload"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span data-t="upload">Upload</span></button>
 <button class="nav-item" data-view="historial"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span data-t="history">History</span></button>
@@ -109,6 +168,33 @@ tbody tr.is-locked td{opacity:.45}tbody tr.section-row td{background:var(--bg-el
 <div class="stats-grid" id="fullStats"></div>
 <div class="breakdown-grid"><div class="breakdown-card"><h3 data-t="by_status">By Status</h3><div id="statusBreakdown"></div></div><div class="breakdown-card"><h3 data-t="by_agent">By Agent</h3><div id="agentBreakdown"></div></div></div>
 </div>
+<div class="view" id="seguimientoView">
+<div class="page-header"><div class="page-title"><h1>Seguimiento</h1><div class="subtitle" id="fuSub">Leads tibios para recontactar</div></div><button class="btn" type="button" onclick="loadFollowups()">Actualizar</button></div>
+<p class="fu-help" id="fuHelp">Entra con tu PIN. Solo verás tus contactos y tus notas.</p>
+<div id="fuGate" class="fu-gate">
+<h2>Tu PIN</h2>
+<p>Cada persona entra con el suyo. Perla, Yoana y Jazmin ven solo su lista. Jasjit ve las tres.</p>
+<form id="fuGateForm">
+<input id="fuPin" class="fu-pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="PIN" required>
+<button class="btn" type="submit">Entrar</button>
+<p id="fuPinErr" class="fu-pin-err"></p>
+</form>
+</div>
+<div id="fuSummary" class="fu-sum" style="display:none"></div>
+<div class="agent-tabs fu-tabs" id="fuTabs" style="display:none">
+<button type="button" class="agent-tab active" data-assignee="all">Todas</button>
+<button type="button" class="agent-tab" data-assignee="perla">Perla</button>
+<button type="button" class="agent-tab" data-assignee="yoana">Yoana</button>
+<button type="button" class="agent-tab" data-assignee="jazmin">Jazmin</button>
+</div>
+<div class="toolbar" id="fuTools" hidden>
+<input class="search-input" id="fuSearch" type="text" placeholder="Buscar nombre, teléfono o ciudad" autocomplete="off">
+<select class="select-input" id="fuLife"><option value="">Todas las etapas</option></select>
+<select class="select-input" id="fuScope" style="display:none"><option value="active">Lista activa</option><option value="all">Todas, con resultado</option></select>
+<span class="count-tag"><strong id="fuCount">0</strong> <span id="fuCountWord">pendientes</span></span>
+</div>
+<div id="fuList"></div>
+</div>
 </main>
 </div>
 <script>
@@ -117,7 +203,7 @@ en:{contacts:'Contacts',upload:'Upload',history:'History',summary:'Summary',cont
 let LANG=localStorage.getItem('sahiba_lang')||'es';
 function t(k){return T[LANG][k]||T.es[k]||k}
 function applyLang(){document.getElementById('langBtn').textContent=LANG==='es'?'EN':'ES';document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(T[LANG][k])el.textContent=T[LANG][k]});document.querySelectorAll('[data-ph]').forEach(function(el){var k=el.dataset.ph;if(T[LANG][k])el.placeholder=T[LANG][k]})}
-function toggleLang(){LANG=LANG==='es'?'en':'es';localStorage.setItem('sahiba_lang',LANG);applyLang();loadContacts()}
+function toggleLang(){LANG=LANG==='es'?'en':'es';localStorage.setItem('sahiba_lang',LANG);applyLang();if(VIEW_MODE!=='perla')loadContacts()}
 // Dark (default) / light theme, remembered per browser
 function applyTheme(th){document.documentElement.setAttribute('data-theme',th);var b=document.getElementById('themeBtn');if(b){b.textContent=th==='dark'?'☀ LIGHT':'☾ DARK';b.title=th==='dark'?'Switch the whole CRM to light mode':'Switch the whole CRM to dark mode'}}
 function toggleTheme(){var th=(localStorage.getItem('sahiba_theme')||'dark')==='dark'?'light':'dark';localStorage.setItem('sahiba_theme',th);applyTheme(th)}
@@ -130,6 +216,8 @@ var VIEW_MODE=urlParams.get('v');
 var IS_ADMIN=!VIEW_MODE;
 var currentAgent=VIEW_MODE||'nancy',currentHistAgent=VIEW_MODE||'nancy',currentStatsAgent=VIEW_MODE||'nancy',currentMsgAgent='nancy',allContacts=[],debounceTimer=null;
 if(!IS_ADMIN)document.querySelectorAll('.admin-only,.nav-admin').forEach(function(el){el.style.display='none'});
+if(VIEW_MODE==='nancy')document.querySelectorAll('.nav-seg').forEach(function(el){el.style.display='none'});
+if(VIEW_MODE==='perla'){document.title='Seguimiento · Sahiba';document.querySelectorAll('.nav-item').forEach(function(el){if(el.dataset.view!=='seguimiento')el.style.display='none'});}
 DEFAULT_MSG.hot='Hola {nombre}, soy Nancy de Sahiba 😊 Vi que te interesó nuestra colección y quiero ayudarte a completar tu pedido. Si ya estás lista, con gusto te ayudo a cerrarlo hoy.';
 // Message templates + catalog info live on the server (settings table) so an admin edit reaches Nancy's browser too
 var SETTINGS={},CATALOGS=[];
@@ -145,7 +233,7 @@ function pickCat(slug){SEL_CAT=slug;localStorage.setItem('sahiba_cat',slug);docu
 // Anchor href is built at click time so it always uses the current message + picked catalog
 function setWa(a,agent){a.href='https://wa.me/'+a.dataset.phone+'?text='+encodeURIComponent(buildWaText(agent,a.dataset.name))}
 async function api(path,method,body){method=method||'GET';var opts={method:method,headers:{'Authorization':'Bearer '+AUTH_TOKEN,'Content-Type':'application/json'}};if(body)opts.body=JSON.stringify(body);var res=await fetch(API_BASE+'/.netlify/functions/api'+path,opts);if(!res.ok)throw new Error('API '+res.status);document.getElementById('connStatus').classList.remove('off');return res.json()}
-function showView(name){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.getElementById(name+'View').classList.add('active');document.querySelectorAll('.nav-item').forEach(function(t){t.classList.toggle('active',t.dataset.view===name)});if(name==='stats')loadStats();if(name==='historial')loadHistorial();if(name==='hot')loadHot()}
+function showView(name){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.getElementById(name+'View').classList.add('active');document.querySelectorAll('.nav-item').forEach(function(t){t.classList.toggle('active',t.dataset.view===name)});if(name==='stats')loadStats();if(name==='historial')loadHistorial();if(name==='hot')loadHot();if(name==='seguimiento')loadFollowups()}
 document.querySelectorAll('.nav-item').forEach(function(b){b.addEventListener('click',function(){showView(this.dataset.view)})});
 function switchAgent(a){currentAgent=a;document.querySelectorAll('#agentTabs .agent-tab').forEach(function(t){t.classList.toggle('active',t.textContent.trim().toLowerCase().includes(a))});loadContacts()}
 function switchHistAgent(a){currentHistAgent=a;document.querySelectorAll('#histAgentTabs .agent-tab').forEach(function(t){t.classList.toggle('active',t.textContent.trim().toLowerCase().includes(a))});loadHistorial()}
@@ -248,6 +336,40 @@ dzH.addEventListener('drop',function(e){e.preventDefault();dzH.classList.remove(
 fiH.addEventListener('change',function(e){if(e.target.files.length)processHotUpload(e.target.files[0])});
 function readHotExcel(file){return new Promise(function(resolve,reject){var reader=new FileReader();reader.onload=function(e){try{var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});var ws=wb.Sheets[wb.SheetNames[0]];var rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true});var hdr=rows[0]||[];var h={};hdr.forEach(function(x,i){h[String(x).toLowerCase().trim()]=i});function g(r,k){var i=h[k];return i==null?null:(r[i]==null?null:r[i])}var out=[];for(var i=1;i<rows.length;i++){var r=rows[i];if(!r||!r.length)continue;var phone=String(g(r,'phone')||'').replace(/[^0-9]/g,'');if(!phone)continue;out.push({phone:phone,name:g(r,'name'),city:g(r,'city'),region:g(r,'region'),tag_bucket:g(r,'tag_bucket'),score:g(r,'score'),why:g(r,'why'),lifecycle:g(r,'lifecycle')||g(r,'today_lifecycle'),intent_score:g(r,'intent_score'),inbound_msgs:g(r,'inbound_msgs'),photos:g(r,'photos'),last_inbound:g(r,'last_inbound'),last_ask:g(r,'last_ask_snippet')})}resolve(out)}catch(err){reject(err)}};reader.onerror=function(){reject(new Error('Read error'))};reader.readAsArrayBuffer(file)})}
 async function processHotUpload(file){var el=document.getElementById('ur-hot');el.className='upload-result';el.style.display='block';el.textContent=t('processing');try{var contacts=await readHotExcel(file);var r=await api('/hot/upload','POST',{contacts:contacts,replace:true});el.className='upload-result success';el.innerHTML='✓ New: <strong>'+r.new+'</strong> · Updated: <strong>'+r.upd+'</strong> · Removed: '+r.removed+' · Skipped: '+r.skipped+' · Total in file: '+r.total;loadHot()}catch(e){el.className='upload-result error';el.textContent=e.message}}
+// ===== Seguimiento: Perla, Jazmin y Yoana, cada una con su PIN =====
+var FU_STATUSES=[['Vendido','sold'],['Viene a la tienda','store'],['Volver a llamar','later'],['No contestó','no'],['No le interesa','nope'],['Número equivocado','bad']];
+var FU={rows:[], assignee:'all', scope:'active', seq:0, pin:'', role:null, person:null};
+function fuPersonName(a){if(a==='yoana')return 'Yoana';if(a==='jazmin')return 'Jazmin';if(a==='perla')return 'Perla';if(a==='admin')return 'Admin';return a?String(a):''}
+function fuApi(path,method,body){method=method||'GET';var opts={method:method,headers:{'Authorization':'Bearer '+FU.pin,'Content-Type':'application/json'}};if(body)opts.body=JSON.stringify(body);return fetch(API_BASE+'/.netlify/functions/api'+path,opts).then(function(res){return res.json().catch(function(){return{}}).then(function(data){if(res.status===401){FU.role=null;FU.pin='';try{sessionStorage.removeItem('sahiba_fu_pin')}catch(err){}throw new Error(data.error||'PIN incorrecto')}if(!res.ok)throw new Error(data.error||('Error '+res.status));var dot=document.getElementById('connStatus');if(dot)dot.classList.remove('off');return data})})}
+function fuDays(n){if(n==null||n==='')return 'Sin fecha';var x=Number(n);if(!isFinite(x))return 'Sin fecha';if(x<1)return 'hoy';var d=Math.floor(x);return d===1?'hace 1 día':'hace '+d+' días'}
+function fuDayClass(n){var d=Math.floor(Number(n)||0);return d>=30?'days-stale':d>=7?'days-aging':'days-fresh'}
+function fuLifeClass(l){var k=String(l||'').toLowerCase();if(k.indexOf('intento')>=0)return 'fu-life-intento';if(k.indexOf('hot')>=0)return 'fu-life-hot';if(k.indexOf('visita')>=0)return 'fu-life-visita';if(k.indexOf('cold')>=0)return 'fu-life-cold';return ''}
+function fuWhen(iso){if(!iso)return '';try{return new Date(iso).toLocaleString('es-MX',{timeZone:'America/Mexico_City',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}}
+function fuVisible(){var q=(document.getElementById('fuSearch').value||'').trim().toLowerCase();var life=document.getElementById('fuLife').value;return FU.rows.filter(function(r){if(life&&r.lifecycle!==life)return false;if(!q)return true;var blob=((r.name||'')+' '+(r.phone||'')+' '+(r.ciudad||'')+' '+(r.note||'')+' '+(r.contact_id||'')).toLowerCase();return blob.indexOf(q)>=0})}
+function fuFillLives(){var sel=document.getElementById('fuLife');var cur=sel.value;var set={};FU.rows.forEach(function(r){if(r.lifecycle)set[r.lifecycle]=1});var html='<option value="">Todas las etapas</option>';Object.keys(set).sort().forEach(function(k){html+='<option value="'+esc(k)+'">'+esc(k)+'</option>'});sel.innerHTML=html;if(cur&&set[cur])sel.value=cur}
+function fuSetHelp(){var el=document.getElementById('fuSub');var help=document.getElementById('fuHelp');if(FU.role==='admin'){el.textContent='Perla, Jazmin y Yoana';help.textContent='Ves las tres listas, todas las notas y el resumen. Puedes reasignar un contacto. La nota de la llamada o el WhatsApp es obligatoria. No contestó y Volver a llamar se quedan hasta el segundo intento, y entonces pasan a frías.';return}var who=FU.role==='staff'?FU.person:null;if(who==='perla'){el.textContent='Tus llamadas de hoy';help.textContent='Solo ves tus contactos y tus notas. Intento de compra y parte de Hot Lead. Después del resultado escribe qué pasó: la nota es obligatoria. No contestó y Volver a llamar se quedan; al segundo intento se marcan solas como frías.'}else if(who==='jazmin'){el.textContent='Tus llamadas de hoy';help.textContent='Solo ves tus contactos y tus notas. Hot Lead. Después del resultado escribe qué pasó: la nota es obligatoria. No contestó y Volver a llamar se quedan; al segundo intento se marcan solas como frías.'}else if(who==='yoana'){el.textContent='Tus WhatsApp de hoy';help.textContent='Solo ves tus contactos y tus notas. Visita a la tienda y Cold Lead, por WhatsApp personal. Después del resultado escribe qué pasó: la nota es obligatoria. No contestó y Volver a llamar se quedan; al segundo intento se marcan solas como frías.'}else{el.textContent='Leads tibios para recontactar';help.textContent='Entra con tu PIN. Solo verás tus contactos y tus notas.'}}
+function fuShowGate(msg){var gate=document.getElementById('fuGate');var tools=document.getElementById('fuTools');if(gate)gate.hidden=false;if(tools)tools.hidden=true;['fuSummary','fuTabs','fuScope'].forEach(function(id){var n=document.getElementById(id);if(n)n.style.display='none'});var host=document.getElementById('fuList');if(host)host.innerHTML='';var err=document.getElementById('fuPinErr');if(err)err.textContent=msg||'';fuSetHelp()}
+function fuApplyChrome(){var admin=FU.role==='admin';var gate=document.getElementById('fuGate');var tools=document.getElementById('fuTools');if(gate)gate.hidden=true;if(tools)tools.hidden=false;['fuSummary','fuTabs'].forEach(function(id){var n=document.getElementById(id);if(n)n.style.display=admin?'':'none'});var scope=document.getElementById('fuScope');if(scope)scope.style.display='';if(admin){document.querySelectorAll('#fuTabs .agent-tab').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-assignee')===FU.assignee)})}}
+async function fuLogin(pin){var res=await fetch(API_BASE+'/.netlify/functions/api/followups/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:pin})});var data=await res.json().catch(function(){return{}});if(!res.ok)throw new Error(data.error||'PIN incorrecto');FU.pin=pin;FU.role=data.role;FU.person=data.person||null;try{sessionStorage.setItem('sahiba_fu_pin',pin)}catch(e){}return data}
+async function fuEnsureSession(){if(FU.role&&FU.pin)return true;var saved='';try{saved=sessionStorage.getItem('sahiba_fu_pin')||''}catch(e){}if(!saved)return false;try{await fuLogin(saved);return true}catch(e){FU.pin='';FU.role=null;try{sessionStorage.removeItem('sahiba_fu_pin')}catch(err){}return false}}
+function fuHistoryHtml(c){var h=c.history||[];if(!h.length)return '';var html='<div class="fu-block"><div class="fu-kicker">Historial</div>';for(var i=0;i<h.length;i++){var ev=h[i];html+='<div class="fu-hist"><b>'+esc(ev.status||'')+'</b> · '+esc(fuPersonName(ev.person))+' · '+esc(fuWhen(ev.created_at))+(ev.comment?'<br>'+esc(ev.comment):'')+'</div>'}return html+'</div>'}
+function fuReassignHtml(c){if(FU.role!=='admin')return '';var opts=['perla','yoana','jazmin'];var html='<label class="fu-kicker" style="display:block;margin-top:12px">Reasignar</label><select class="select-input fu-reassign" data-fu="reassign">';for(var i=0;i<opts.length;i++)html+='<option value="'+opts[i]+'"'+(c.assignee===opts[i]?' selected':'')+'>'+fuPersonName(opts[i])+'</option>';return html+'</select>'}
+function fuCard(c){var days=c.days_since_now!=null?c.days_since_now:c.days_since;var phone=c.phone||'';var tel=phone?'tel:+'+phone:'';var wa=phone?'https://wa.me/'+phone+'?text='+encodeURIComponent(c.suggested_message||''):'';var life=c.lifecycle?'<span class="lifecycle-tag '+fuLifeClass(c.lifecycle)+'">'+esc(c.lifecycle)+'</span>':'';var city=c.ciudad?'<span class="day-pill">'+esc(c.ciudad)+'</span>':'';var mine=FU.role==='admin'?'<span class="day-pill">'+esc(fuPersonName(c.assignee))+'</span>':'';var tries=c.active&&c.attempts>0?'<span class="fu-try">Intento '+c.attempts+' de 2</span>':'';var callBtn=phone?'<a class="btn fu-call" href="'+tel+'">Llamar</a>':'<span class="btn is-disabled">Llamar</span>';var waBtn=phone?'<a class="btn fu-wa" href="'+wa+'" target="_blank" rel="noopener noreferrer">WhatsApp</a>':'<span class="btn is-disabled">WhatsApp</span>';var actions='<div class="fu-actions">'+callBtn+waBtn+'<button type="button" class="btn" data-fu="copy">Copiar mensaje</button></div>';var outcomes='';if(c.active){outcomes='<label class="fu-kicker" style="display:block;margin-top:12px">Qué pasó (obligatorio)</label><input class="notes-field fu-comment" maxlength="280" placeholder="Qué pasó en la llamada o el WhatsApp" required autocomplete="off"><div class="fu-outcomes">';for(var i=0;i<FU_STATUSES.length;i++){outcomes+='<button type="button" class="fu-out '+FU_STATUSES[i][1]+'" data-fu="status" data-status="'+FU_STATUSES[i][0]+'">'+FU_STATUSES[i][0]+'</button>'}outcomes+='</div>'}else{outcomes='<div class="fu-result"><b>'+esc(c.outcome||'Cerrado')+'</b>'+(c.outcome_at?' · '+esc(fuWhen(c.outcome_at)):'')+(c.outcome_comment?'<br>'+esc(c.outcome_comment):'')+'</div>'}return '<article class="fu-card" data-cid="'+esc(c.contact_id)+'"><div class="fu-top"><div><div class="fu-name">'+esc(c.name||'Sin nombre')+'</div><div class="fu-phone">'+esc(phone?('+'+phone):'Sin teléfono')+'</div></div><div class="fu-side">'+life+'<span class="days-chip '+fuDayClass(days)+'">'+esc(fuDays(days))+'</span></div></div><div class="fu-meta">'+city+mine+tries+'</div><div class="fu-block"><div class="fu-kicker">Nota</div><p>'+esc(c.note||'Sin nota')+'</p></div><div class="fu-block"><div class="fu-kicker">Mensaje sugerido</div><p>'+esc(c.suggested_message||'')+'</p></div>'+fuHistoryHtml(c)+actions+outcomes+fuReassignHtml(c)+'</article>'}
+function fuRender(){var rows=fuVisible();document.getElementById('fuCount').textContent=rows.length;var word=document.getElementById('fuCountWord');if(word)word.textContent=FU.scope==='all'?'contactos':'pendientes';var host=document.getElementById('fuList');if(!rows.length){host.innerHTML='<div class="loading">'+(FU.rows.length?'Nada coincide con la búsqueda.':'No hay seguimientos pendientes.')+'</div>';return}var html='<div class="fu-list">';for(var i=0;i<rows.length;i++)html+=fuCard(rows[i]);host.innerHTML=html+'</div>'}
+function fuSummaryHtml(s){if(!s)return '';function card(name,channel,p){p=p||{};return '<div class="fu-sum-card"><h3>'+name+'</h3><div class="who">'+channel+' · hoy</div><div class="fu-metrics"><div class="fu-metric accent"><div class="n">'+(p.assigned||0)+'</div><div class="l">Asignados</div></div><div class="fu-metric"><div class="n">'+(p.contacted||0)+'</div><div class="l">Contactados hoy</div></div><div class="fu-metric warm"><div class="n">'+(p.reached||0)+'</div><div class="l">Alcanzados hoy</div></div><div class="fu-metric good"><div class="n">'+(p.sold||0)+'</div><div class="l">Vendidos hoy</div></div><div class="fu-metric good"><div class="n">'+(p.coming_to_store||0)+'</div><div class="l">Vienen hoy</div></div></div></div>'}var ch=function(p){return (p&&p.channel)==='whatsapp'?'WhatsApp':'Llamadas'};return card('Perla',ch(s.perla),s.perla)+card('Yoana',ch(s.yoana),s.yoana)+card('Jazmin',ch(s.jazmin),s.jazmin)+'<p class="fu-note-sum" style="grid-column:1/-1">Hoy en Ciudad de México'+(s.date?' · '+esc(s.date):'')+'. Asignados es la lista activa. Contactados, alcanzados, vendidos y vienen a la tienda cuentan lo anotado hoy. Alcanzado = habló o escribió (vendido, viene, volver a llamar o no le interesa).</p>'}
+async function loadFuSummary(){if(FU.role!=='admin')return;try{var s=await fuApi('/followups/summary');var el=document.getElementById('fuSummary');if(el)el.innerHTML=fuSummaryHtml(s)}catch(e){var box=document.getElementById('fuSummary');if(box)box.innerHTML='<div class="fu-sum-card" style="color:var(--red)">'+esc(e.message)+'</div>'}}
+async function loadFollowups(){var seq=++FU.seq;var host=document.getElementById('fuList');if(!(await fuEnsureSession())){if(seq!==FU.seq)return;fuShowGate('');return}if(seq!==FU.seq)return;fuApplyChrome();fuSetHelp();var params=new URLSearchParams();params.set('scope',FU.scope);if(FU.role==='admin'&&FU.assignee&&FU.assignee!=='all')params.set('assignee',FU.assignee);host.innerHTML='<div class="loading"><div class="spinner"></div>Cargando...</div>';try{var data=await fuApi('/followups?'+params);if(seq!==FU.seq)return;FU.rows=data.rows||[];fuFillLives();fuRender();if(FU.role==='admin')loadFuSummary()}catch(e){if(seq!==FU.seq)return;if(!FU.pin){fuShowGate(e.message);return}host.innerHTML='<div class="loading" style="color:var(--red)">'+esc(e.message)+'</div>'}}
+function fuById(id){for(var i=0;i<FU.rows.length;i++)if(String(FU.rows[i].contact_id)===String(id))return FU.rows[i]}
+async function fuCopy(text){try{await navigator.clipboard.writeText(text);toast('Mensaje copiado')}catch(e){var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');toast('Mensaje copiado')}catch(err){toast('No se pudo copiar')}ta.remove()}}
+async function fuOutcome(card,status){var cid=card.getAttribute('data-cid');if(!/^\d+$/.test(cid)||card.classList.contains('is-busy'))return;var row=fuById(cid);if(!row)return;var commentEl=card.querySelector('.fu-comment');var comment=commentEl?commentEl.value.trim():'';if(!comment){if(commentEl){commentEl.classList.add('need');commentEl.focus()}toast('Escribe qué pasó antes de guardar');return}card.classList.add('is-busy');card.querySelectorAll('.fu-out').forEach(function(b){b.disabled=true});try{var r=await fuApi('/followups/'+cid+'/outcome','POST',{status:status,comment:comment});Object.assign(row,r);if(r.dropped&&FU.scope==='active'){FU.rows=FU.rows.filter(function(x){return String(x.contact_id)!==cid});card.style.opacity='0';setTimeout(function(){card.remove();if(!document.querySelector('#fuList .fu-card'))fuRender();else document.getElementById('fuCount').textContent=fuVisible().length},220);toast(r.cold?'2 intentos. Se marcó como fría y salió de la lista.':'Listo. Salió de la lista.')}else{card.outerHTML=fuCard(row);toast(r.dropped?(r.cold?'2 intentos. Se marcó como fría.':'Resultado guardado.'):('Anotado · intento '+r.attempts+' de 2'))}if(FU.role==='admin')loadFuSummary()}catch(e){card.classList.remove('is-busy');card.querySelectorAll('.fu-out').forEach(function(b){b.disabled=false});toast(e.message)}}
+async function fuReassign(card,assignee){var cid=card.getAttribute('data-cid');var row=fuById(cid);if(!row||row.assignee===assignee)return;try{var r=await fuApi('/followups/'+cid+'/reassign','POST',{assignee:assignee});row.assignee=r.assignee;if(FU.assignee!=='all'&&FU.assignee!==r.assignee){FU.rows=FU.rows.filter(function(x){return String(x.contact_id)!==String(cid)});fuRender()}else card.outerHTML=fuCard(row);toast('Reasignado a '+fuPersonName(r.assignee));if(FU.role==='admin')loadFuSummary()}catch(e){toast(e.message);fuRender()}}
+document.getElementById('fuList').addEventListener('click',function(e){var btn=e.target.closest('[data-fu]');if(!btn||btn.getAttribute('data-fu')==='reassign')return;var card=btn.closest('.fu-card');if(!card)return;var row=fuById(card.getAttribute('data-cid'));if(!row)return;if(btn.getAttribute('data-fu')==='copy'){e.preventDefault();fuCopy(row.suggested_message||'');return}if(btn.getAttribute('data-fu')==='status')fuOutcome(card,btn.getAttribute('data-status'))});
+document.getElementById('fuList').addEventListener('change',function(e){var sel=e.target.closest('[data-fu="reassign"]');if(!sel)return;var card=sel.closest('.fu-card');if(card)fuReassign(card,sel.value)});
+document.getElementById('fuGateForm').addEventListener('submit',function(e){e.preventDefault();var pin=document.getElementById('fuPin').value;var err=document.getElementById('fuPinErr');fuLogin(pin).then(function(){document.getElementById('fuPin').value='';loadFollowups()}).catch(function(ex){if(err)err.textContent=ex.message||'PIN incorrecto'})});
+var fuSearchTimer=null;document.getElementById('fuSearch').addEventListener('input',function(){clearTimeout(fuSearchTimer);fuSearchTimer=setTimeout(fuRender,180)});
+document.getElementById('fuLife').addEventListener('change',fuRender);
+document.getElementById('fuTabs').addEventListener('click',function(e){var b=e.target.closest('[data-assignee]');if(!b||FU.role!=='admin')return;FU.assignee=b.getAttribute('data-assignee');loadFollowups()});
+var fuScopeEl=document.getElementById('fuScope');if(fuScopeEl)fuScopeEl.addEventListener('change',function(){FU.scope=this.value;loadFollowups()});
 (async function(){
   applyLang();
   if(IS_ADMIN){
@@ -261,8 +383,12 @@ async function processHotUpload(file){var el=document.getElementById('ur-hot');e
   }
   // Schema init runs in the background; contacts load right away
   api('/init','POST').catch(function(){});
-  await loadSettings();
-  showMsgFor(currentAgent);loadContacts();
+  if(VIEW_MODE!=='perla'){
+    await loadSettings();
+    showMsgFor(currentAgent);
+    loadContacts();
+  }
+  if(VIEW_MODE==='perla'||urlParams.get('seg')==='1')showView('seguimiento');
 })();
 </script>
 </body>
