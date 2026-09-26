@@ -957,6 +957,8 @@ export default async (req) => {
     }
     // Full reset: every contact list, history and follow-up table. Settings (message templates) and catalogs are kept.
     if (method === 'POST' && path === '/reset-all') {
+      const body = await readBody();
+      if (body.confirm !== 'BORRAR TODO') return json({ error: 'confirm required' }, 400);
       const q = db(); const out = {};
       for (const tname of [...AGENTS.map(tbl), ...AGENTS.map(htbl), 'hot_contacts', 'followup_outcomes', 'followups']) {
         try { out[tname] = (await q(`DELETE FROM ${tname} RETURNING 1`)).length; } catch (e) { out[tname] = 'skip: ' + e.message.slice(0, 40); }
