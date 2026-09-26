@@ -292,7 +292,7 @@ async function getStats(agent) {
 // Separate list (hot_contacts). Every day HOT_DAILY_LIMIT locked contacts are
 // unlocked (highest score first) for Nancy; WhatsApp sends are only accepted
 // for contacts unlocked today. Days are Mexico City days.
-const HOT_DAILY_LIMIT = parseInt(process.env.HOT_DAILY_LIMIT || '5', 10);
+const HOT_DAILY_LIMIT = parseInt(process.env.HOT_DAILY_LIMIT || '10', 10);
 const MX_TODAY = `(NOW() AT TIME ZONE 'America/Mexico_City')::date`;
 const MX_DATE = (col) => `((${col} AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date`;
 
