@@ -1,6 +1,10 @@
 {
   "name": "nancy-tracker",
   "version": "1.0.0",
+  "scripts": {
+    "test": "node scripts/followup.test.mjs",
+    "seed:followups": "node scripts/seed-followups.mjs --stats"
+  },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.0",
     "@netlify/blobs": "^11.0.3",
