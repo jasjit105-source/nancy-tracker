@@ -244,6 +244,10 @@ async function updateContact(agent, id, updates) {
     }
   }
   const { status, notes, whatsapp_sent } = updates;
+  if (whatsapp_sent) {
+    const ready = await q(`SELECT (${hoursSinceExpr}) >= ${MIN_SILENT_HOURS} AS ok FROM ${t} WHERE id = $1`, [id]);
+    if (ready.length && !ready[0].ok) return { error: 'too_recent', code: 403 };
+  }
   let sets = ['date_updated = NOW()'], p = [], i = 1;
   if (status) { sets.push(`status = $${i++}`); p.push(status); }
   if (notes !== undefined) { sets.push(`notes = $${i++}`); p.push(notes); }
@@ -293,6 +297,9 @@ async function getStats(agent) {
 // unlocked (highest score first) for Nancy; WhatsApp sends are only accepted
 // for contacts unlocked today. Days are Mexico City days.
 const HOT_DAILY_LIMIT = parseInt(process.env.HOT_DAILY_LIMIT || '10', 10);
+// A chat may only be messaged once the client has been silent this long (both lists)
+const MIN_SILENT_HOURS = parseInt(process.env.MIN_SILENT_HOURS || '85', 10);
+const HOT_READY = `(last_inbound IS NULL OR last_inbound <= NOW() - INTERVAL '${MIN_SILENT_HOURS} hours')`;
 const MX_TODAY = `(NOW() AT TIME ZONE 'America/Mexico_City')::date`;
 const MX_DATE = (col) => `((${col} AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date`;
 
@@ -301,11 +308,11 @@ async function unlockHotDaily() {
   const c = await q(`SELECT COUNT(*)::int AS n FROM hot_contacts WHERE unlocked_date = ${MX_TODAY}`);
   const need = HOT_DAILY_LIMIT - c[0].n;
   if (need <= 0) return 0;
-  const r = await q(`UPDATE hot_contacts SET unlocked_date = ${MX_TODAY}, date_updated = NOW() WHERE id IN (SELECT id FROM hot_contacts WHERE unlocked_date IS NULL ORDER BY score DESC NULLS LAST, sort_order ASC NULLS LAST, id ASC LIMIT $1) RETURNING id`, [need]);
+  const r = await q(`UPDATE hot_contacts SET unlocked_date = ${MX_TODAY}, date_updated = NOW() WHERE id IN (SELECT id FROM hot_contacts WHERE unlocked_date IS NULL AND ${HOT_READY} ORDER BY score DESC NULLS LAST, sort_order ASC NULLS LAST, id ASC LIMIT $1) RETURNING id`, [need]);
   return r.length;
 }
 
-const hotCols = `id, phone, name, city, region, tag_bucket, score, why, lifecycle, intent_score, inbound_msgs, photos, last_inbound, last_ask, status, notes, whatsapp_sent, whatsapp_sent_date, unlocked_date, ROUND(EXTRACT(EPOCH FROM (NOW() - last_inbound))/3600)::int AS hours_since, (unlocked_date = ${MX_TODAY}) AS is_today, (whatsapp_sent_date IS NOT NULL AND ${MX_DATE('whatsapp_sent_date')} = ${MX_TODAY}) AS sent_today`;
+const hotCols = `id, phone, name, city, region, tag_bucket, score, why, lifecycle, intent_score, inbound_msgs, photos, last_inbound, last_ask, status, notes, whatsapp_sent, whatsapp_sent_date, unlocked_date, ROUND(EXTRACT(EPOCH FROM (NOW() - last_inbound))/3600)::int AS hours_since, (unlocked_date = ${MX_TODAY}) AS is_today, ${HOT_READY} AS is_ready, (whatsapp_sent_date IS NOT NULL AND ${MX_DATE('whatsapp_sent_date')} = ${MX_TODAY}) AS sent_today`;
 
 async function getHotContacts(qs) {
   const q = db();
@@ -370,11 +377,12 @@ async function uploadHot(contacts, replace) {
 async function updateHotContact(id, updates) {
   const q = db();
   const { status, notes, whatsapp_sent } = updates;
-  const row = await q(`SELECT id, unlocked_date, whatsapp_sent, (unlocked_date = ${MX_TODAY}) AS is_today FROM hot_contacts WHERE id = $1`, [id]);
+  const row = await q(`SELECT id, unlocked_date, whatsapp_sent, (unlocked_date = ${MX_TODAY}) AS is_today, ${HOT_READY} AS is_ready FROM hot_contacts WHERE id = $1`, [id]);
   if (!row.length) return { error: 'not found', code: 404 };
   if (!row[0].unlocked_date) return { error: 'locked', code: 403 };
   // First send only on today's chats; re-sending to an already-contacted client (follow-up from History) is always allowed
   if (whatsapp_sent && !row[0].is_today && !row[0].whatsapp_sent) return { error: 'daily_limit', code: 403 };
+  if (whatsapp_sent && !row[0].is_ready) return { error: 'too_recent', code: 403 };
   let sets = ['date_updated = NOW()'], p = [], i = 1;
   if (status) { sets.push(`status = $${i++}`); p.push(status); }
   if (notes !== undefined) { sets.push(`notes = $${i++}`); p.push(notes); }
@@ -981,7 +989,8 @@ export default async (req) => {
       const body = await readBody();
       const a = validAgent(body.agent || qs.agent);
       if (!a) return json({ error: 'agent required' }, 400);
-      return json(await updateContact(a, id, body));
+      const r = await updateContact(a, id, body);
+      return r.error ? json({ error: r.error }, r.code) : json(r);
     }
     if (method === 'GET' && path === '/stats') {
       if (!agent) return json({ error: 'agent required' }, 400);
