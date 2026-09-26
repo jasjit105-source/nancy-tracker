@@ -947,6 +947,14 @@ export default async (req) => {
       const body = await readBody();
       return json(await uploadHot(body.contacts || [], body.replace !== false));
     }
+    // Full reset: every contact list, history and follow-up table. Settings (message templates) and catalogs are kept.
+    if (method === 'POST' && path === '/reset-all') {
+      const q = db(); const out = {};
+      for (const tname of [...AGENTS.map(tbl), ...AGENTS.map(htbl), 'hot_contacts', 'followup_outcomes', 'followups']) {
+        try { out[tname] = (await q(`DELETE FROM ${tname} RETURNING 1`)).length; } catch (e) { out[tname] = 'skip: ' + e.message.slice(0, 40); }
+      }
+      return json({ success: true, cleared: out });
+    }
     if (method === 'POST' && path === '/hot/clear') {
       const r = await db()(`DELETE FROM hot_contacts RETURNING id`);
       return json({ cleared: r.length });
