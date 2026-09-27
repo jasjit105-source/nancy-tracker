@@ -296,7 +296,8 @@ async function getStats(agent) {
 // Separate list (hot_contacts). Every day HOT_DAILY_LIMIT locked contacts are
 // unlocked (highest score first) for Nancy; WhatsApp sends are only accepted
 // for contacts unlocked today. Days are Mexico City days.
-const HOT_DAILY_LIMIT = parseInt(process.env.HOT_DAILY_LIMIT || '10', 10);
+// 0 = no daily cap: every eligible (85h-silent) chat opens at once
+const HOT_DAILY_LIMIT = parseInt(process.env.HOT_DAILY_LIMIT || '0', 10);
 // A chat may only be messaged once the client has been silent this long (both lists)
 const MIN_SILENT_HOURS = parseInt(process.env.MIN_SILENT_HOURS || '85', 10);
 const HOT_READY = `(last_inbound IS NULL OR last_inbound <= NOW() - INTERVAL '${MIN_SILENT_HOURS} hours')`;
@@ -306,7 +307,7 @@ const MX_DATE = (col) => `((${col} AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mex
 async function unlockHotDaily() {
   const q = db();
   const c = await q(`SELECT COUNT(*)::int AS n FROM hot_contacts WHERE unlocked_date = ${MX_TODAY}`);
-  const need = HOT_DAILY_LIMIT - c[0].n;
+  const need = HOT_DAILY_LIMIT > 0 ? HOT_DAILY_LIMIT - c[0].n : 100000;
   if (need <= 0) return 0;
   const r = await q(`UPDATE hot_contacts SET unlocked_date = ${MX_TODAY}, date_updated = NOW() WHERE id IN (SELECT id FROM hot_contacts WHERE unlocked_date IS NULL AND ${HOT_READY} ORDER BY score DESC NULLS LAST, sort_order ASC NULLS LAST, id ASC LIMIT $1) RETURNING id`, [need]);
   return r.length;
@@ -381,7 +382,7 @@ async function updateHotContact(id, updates) {
   if (!row.length) return { error: 'not found', code: 404 };
   if (!row[0].unlocked_date) return { error: 'locked', code: 403 };
   // First send only on today's chats; re-sending to an already-contacted client (follow-up from History) is always allowed
-  if (whatsapp_sent && !row[0].is_today && !row[0].whatsapp_sent) return { error: 'daily_limit', code: 403 };
+  if (HOT_DAILY_LIMIT > 0 && whatsapp_sent && !row[0].is_today && !row[0].whatsapp_sent) return { error: 'daily_limit', code: 403 };
   if (whatsapp_sent && !row[0].is_ready) return { error: 'too_recent', code: 403 };
   let sets = ['date_updated = NOW()'], p = [], i = 1;
   if (status) { sets.push(`status = $${i++}`); p.push(status); }
